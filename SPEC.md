@@ -811,10 +811,20 @@ push 與 pull_request 皆觸發。
 2. `npm run typecheck` 零錯
 3. `pi -ne -e <path>` 可載入並完成一次切換
 4. laya 後端延遲 p95 < 80ms（`test/latency.ts` 實測）
-5. `grep -riE 'da-vinci-noob|pi-jev-model-router|JEV_' extensions/ scripts/ test/ package.json` **零結果**（上游識別標記）；
-   `grep -riE '\bJev\b' extensions/ scripts/` 僅允許出現在
-   `classify/cloud.ts` 的預設 `model: "jev-latest"`（typesafe API 的模型別名，
-   屬第三方 API 事實，見 Part 4.3），其餘零結果
+5. 上游識別標記掃描。**只有 exit code `1` 算通過**：`0` = 有命中 = 失敗，
+   `2` = grep 錯誤（路徑不存在）= **根本沒跑**，不得當作通過
+   （2026-10-01 實例：命令裡的 `scripts/` 尚不存在，回 exit=2，
+   极易被誤讀成零結果）：
+
+   ```sh
+   grep -riE 'da-vinci-noob|pi-jev-model-router|JEV_' extensions/ test/ package.json README.md; echo $?   # 要 1
+   grep -rnwE 'Jev' extensions/ test/; echo $?                                                          # 要 1
+   ```
+
+   只掃**當時實際存在的路徑**；`scripts/` 要等 Part 13 #7 的
+   `refresh-facts.mjs` 建立後才存在，未建立前加進去只会让 grep 回 2。
+   第二條僅允許命中 `classify/cloud.ts` 的 `model: "jev-latest"`
+   （typesafe API 的模型別名，屬第三方 API 事實，見 Part 4.3）。
 6. **上游重複區塊審計**（與完成條件「不開啟 Part 0.2 檔案」的衝突已解，見下）：
    實作凍結後，由**未參與實作的程序**（獨立子代理或主代理皆可）對
    Part 0.2 清單逐一跑 diff，`>3 行連續相同即失敗`。
