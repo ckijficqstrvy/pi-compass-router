@@ -5,6 +5,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 import { CONFIG_FILE, loadConfig, validatePatch, WRITABLE_KEYS } from "../extensions/pi-compass-router/config/load.js";
+import { blendedOf, factsValid, rankedFacts, sliceBands } from "../extensions/pi-compass-router/policy/facts.js";
 import { COMPASS_ENV_MAP, parseEnvOverrides } from "../extensions/pi-compass-router/config/env.js";
 
 /** 空環境：不繼承 process.env，測試結果才可重現。 */
@@ -285,4 +286,136 @@ test("WRITABLE_KEYS matches the SPEC Part 3.1 whitelist", () => {
   for (const key of expected) {
     assert.ok(WRITABLE_KEYS.includes(key), `missing writable key: ${key}`);
   }
+});
+
+// ---------------------------------------------------------------------------
+// L1 facts + L2 policy 組合（Part 9）
+// ---------------------------------------------------------------------------
+
+test("autoRoutes derives tier chains from the facts file", () => {
+  const { config } = loadConfig(NO_ENV, { filePath: "/nonexistent" });
+  assert.ok(config.routes.quick.length > 0, "quick band must be derived");
+  assert.ok(config.routes.standard.length > 0);
+  assert.ok(config.routes.premium.length > 0);
+  // 快帶第一位應是能力最高的平價模型（glm-flash，cap 42，blended 0.52）。
+  assert.match(config.routes.quick[0].model, /glm-flash/);
+});
+
+test("a tier written in config.json is not overwritten by derivation (L3 wins)", () => {
+  const temp = withTempConfig({ routes: { quick: [{ provider: "openrouter", model: "my/own-model" }] } });
+  try {
+    const { config } = loadConfig(NO_ENV, { filePath: temp.path });
+    assert.deepStrictEqual(
+      config.routes.quick.map((t) => t.model),
+      ["my/own-model"],
+      "a tier the user owns is never re-derived",
+    );
+  } finally {
+    temp.cleanup();
+  }
+});
+
+test("deny strips derived chains but not explicit ones", () => {
+  const temp = withTempConfig({
+    deny: ["*claude-opus*"],
+    routes: { premium: [{ provider: "openrouter", model: "~anthropic/claude-opus-latest" }] },
+  });
+  try {
+    const { config } = loadConfig(NO_ENV, { filePath: temp.path });
+    const models = config.routes.premium.map((t) => t.model);
+    assert.ok(models.includes("~anthropic/claude-opus-latest"), "explicit survives its own deny");
+    assert.equal(models.filter((m) => m.includes("claude-opus")).length, 1, "no derived duplicate was added");
+  } finally {
+    temp.cleanup();
+  }
+});
+
+test("prefer heads land first in the chain", () => {
+  const temp = withTempConfig({ prefer: { quick: ["moonshotai/kimi-k3"] } });
+  try {
+    const { config } = loadConfig(NO_ENV, { filePath: temp.path });
+    assert.equal(config.routes.quick[0].model, "moonshotai/kimi-k3");
+    assert.equal(config.routes.quick[0].explicit, true);
+  } finally {
+    temp.cleanup();
+  }
+});
+
+test("useDefaultModels:false empties the built-in chains", () => {
+  const { config } = loadConfig({ COMPASS_USE_DEFAULT_MODELS: "0" }, { filePath: "/nonexistent" });
+  assert.equal(config.useDefaultModels, false);
+  assert.deepStrictEqual(config.routes.quick, [], "no built-in model may remain");
+  assert.deepStrictEqual(config.routes.premium, []);
+  assert.deepStrictEqual(config.kindModels, {}, "kind specialists are built-in too");
+  assert.ok(Object.keys(config.taskKinds).length > 0, "kind *taxonomy* is not a model chain, it stays");
+});
+
+test("useDefaultModels:false still keeps the chains the user wrote", () => {
+  const temp = withTempConfig({
+    useDefaultModels: false,
+    routes: { high: [{ provider: "openrouter", model: "my/bring-your-own" }] },
+  });
+  try {
+    const { config } = loadConfig(NO_ENV, { filePath: temp.path });
+    assert.deepStrictEqual(config.routes.high.map((t) => t.model), ["my/bring-your-own"]);
+    assert.deepStrictEqual(config.routes.quick, []);
+  } finally {
+    temp.cleanup();
+  }
+});
+
+test("useDefaultModels:false is not back-filled by the facts file", () => {
+  const { config } = loadConfig({ COMPASS_USE_DEFAULT_MODELS: "false" }, { filePath: "/nonexistent" });
+  assert.deepStrictEqual(config.routes.quick, [], "facts must not re-fill an emptied chain");
+});
+
+// ---------------------------------------------------------------------------
+// facts 層（Part 9 L1）
+// ---------------------------------------------------------------------------
+
+test("blendedOf is input + 2×output (the ceiling metric)", () => {
+  assert.equal(blendedOf({ input: 2, output: 3 }), 8);
+  assert.equal(blendedOf({ input: 0, output: 0 }), 0);
+});
+
+test("factsValid rejects empty, malformed and negative facts", () => {
+  const good = { generatedAt: "2026-10-01", source: "s", models: [{ provider: "p", model: "m", capability: 40 }] };
+  assert.equal(factsValid(good), true);
+  assert.equal(factsValid({ ...good, models: [] }), false, "an empty file is unusable");
+  assert.equal(factsValid({ ...good, generatedAt: 1 }), false);
+  assert.equal(factsValid({ ...good, models: [{ provider: "p", model: "m", capability: Number.NaN }] }), false);
+  assert.equal(factsValid({ ...good, models: [{ provider: "p", model: "m", capability: 1, price: { input: -1, output: 0 } }] }), false);
+  assert.equal(factsValid(undefined), false);
+});
+
+test("rankedFacts sorts by capability descending and keeps ties stable", () => {
+  const facts = {
+    generatedAt: "2026-10-01",
+    source: "s",
+    models: [
+      { provider: "p", model: "low", capability: 10 },
+      { provider: "p", model: "tie-a", capability: 40 },
+      { provider: "p", model: "tie-b", capability: 40 },
+      { provider: "p", model: "high", capability: 90 },
+    ],
+  };
+  assert.deepStrictEqual(rankedFacts(facts).map((m) => m.model), ["high", "tie-a", "tie-b", "low"]);
+});
+
+test("sliceBands puts each priced fact in the first band that covers it", () => {
+  const ranked = [
+    { provider: "p", model: "cheap", capability: 10, price: { input: 0.5, output: 0.1 } },
+    { provider: "p", model: "mid", capability: 20, price: { input: 3, output: 1 } },
+    { provider: "p", model: "rich", capability: 30, price: { input: 100, output: 100 } },
+  ];
+  const bands = sliceBands(ranked, [1, 5, 15, 44, null]);
+  assert.deepStrictEqual(bands[0].map((m) => m.model), ["cheap"]);
+  assert.deepStrictEqual(bands[1].map((m) => m.model), ["mid"]);
+  assert.deepStrictEqual(bands[4].map((m) => m.model), ["rich"], "the open-ended band catches everything else");
+});
+
+test("a fact without a price is never banded (capability alone must not place it)", () => {
+  const ranked = [{ provider: "p", model: "unpriced", capability: 99 }];
+  const bands = sliceBands(ranked, [1, 5, 15, 44, null]);
+  assert.ok(bands.every((band) => band.length === 0), "an unpriced model appears in no derived chain");
 });

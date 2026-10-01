@@ -5,6 +5,12 @@
 /** 模型層級。xpremium 僅在 `xpremium.enabled` 時進入候選（Part 3.1）。 */
 export type Tier = "quick" | "standard" | "high" | "premium" | "xpremium";
 
+/**
+ * 層級由低到高的**唯一**順序來源。compose / guard / facts 共用它，
+ * 避免各檔自行維護一份順序而漂移（與 `TIER_THINKING` 同一理由）。
+ */
+export const TIERS: readonly Tier[] = ["quick", "standard", "high", "premium", "xpremium"];
+
 /** 切換模式（Part 3.1 `mode`）。 */
 export type Mode = "auto" | "confirm" | "notify";
 
@@ -173,9 +179,9 @@ export const DEFAULT_TASK_KINDS: Readonly<Record<string, TaskKindSpec>> = {
 /**
  * 預設設定（SPEC Part 3.1 預設欄）。
  *
- * 規格缺口：`routes`、`kindModels` 的內建內容未在 SPEC 給出（模型預設鏈被
- * Part 13 #7 明列為未定案），骨架以空候選鏈呈現，不自行猜測鏈內容。
- * `taskKinds` 已於 2026-10-01 由 SPEC Part 3.1a 補齊（見 DEFAULT_TASK_KINDS）。
+ * `routes` / `kindModels` 已於 2026-10-01 由 Part 13 #7 解除後定案：
+ * 依 Part 9 balanced 價格帶切片（`npm run refresh-facts` 取得當日價格）。
+ * `taskKinds` 見 Part 3.1a。
  */
 export const DEFAULT_CONFIG: CompassConfig = {
   enabled: true,
@@ -196,8 +202,65 @@ export const DEFAULT_CONFIG: CompassConfig = {
     cacheTtlSeconds: 300,
     confidenceThreshold: 0.34,
   },
-  routes: { quick: [], standard: [], high: [], premium: [], xpremium: [] },
-  kindModels: {},
+  // 內建鏈 = 2026-10-01 依 Part 9 balanced 價格帶切片的前三名（能力降序）。
+  // autoRoutes 開啟且事實檔可用時，載入時會用當日事實重新推導覆蓋這些
+  // 非顯式條目；這裡的值只在事實檔不可用時充作 fail-open 起點（Part 9 L1）。
+  // 要排除旗艦機型，在 config.json 設 `deny`（明寫的條目不受其影響）。
+  routes: {
+    quick: [
+      { provider: "openrouter", model: "~z-ai/glm-flash-latest" },
+      { provider: "openrouter", model: "deepseek/deepseek-v4-flash" },
+      { provider: "openrouter", model: "~openai/gpt-luna-latest" },
+    ],
+    standard: [{ provider: "openrouter", model: "xiaomi/mimo-v2.6-pro" }],
+    high: [
+      { provider: "openrouter", model: "~x-ai/grok-latest" },
+      { provider: "openrouter", model: "~z-ai/glm-latest" },
+      { provider: "openrouter", model: "meta/muse-spark-1.3" },
+    ],
+    premium: [
+      { provider: "openrouter", model: "~anthropic/claude-opus-latest" },
+      { provider: "openrouter", model: "openai/gpt-6-sol" },
+      { provider: "openrouter", model: "moonshotai/kimi-k3" },
+    ],
+    xpremium: [{ provider: "openrouter", model: "openai/gpt-6-astra" }],
+  },
+  // 專家鏈（Part 3.1「內建」）：依任務性質選模型，minTier 决定何时可用。
+  // 只用上面價格帶內的模型，避免專家鏈把便宜層引用到旗艦。
+  kindModels: {
+    plan: [
+      { provider: "openrouter", model: "openai/gpt-6-sol", minTier: "premium" },
+      { provider: "openrouter", model: "~z-ai/glm-latest", minTier: "high" },
+    ],
+    review: [
+      { provider: "openrouter", model: "openai/gpt-6-sol", minTier: "high" },
+      { provider: "openrouter", model: "~anthropic/claude-sonnet-latest", minTier: "standard" },
+    ],
+    implement: [
+      { provider: "openrouter", model: "xiaomi/mimo-v2.6-pro", minTier: "standard" },
+      { provider: "openrouter", model: "~anthropic/claude-sonnet-latest", minTier: "standard" },
+      { provider: "openrouter", model: "openai/gpt-6-sol", minTier: "high" },
+    ],
+    debug: [
+      { provider: "openrouter", model: "xiaomi/mimo-v2.6-pro", minTier: "standard" },
+      { provider: "openrouter", model: "openai/gpt-6-sol", minTier: "high" },
+    ],
+    refactor: [{ provider: "openrouter", model: "xiaomi/mimo-v2.6-pro", minTier: "standard" }],
+    operate: [{ provider: "openrouter", model: "xiaomi/mimo-v2.6-pro", minTier: "standard" }],
+    research: [
+      { provider: "openrouter", model: "~deepseek/deepseek-pro-latest", minTier: "standard" },
+      { provider: "openrouter", model: "xiaomi/mimo-v2.6-pro", minTier: "standard" },
+    ],
+    write: [
+      { provider: "openrouter", model: "~anthropic/claude-sonnet-latest", minTier: "standard" },
+      { provider: "openrouter", model: "xiaomi/mimo-v2.6-pro", minTier: "standard" },
+    ],
+    explain: [
+      { provider: "openrouter", model: "~z-ai/glm-flash-latest", minTier: "quick" },
+      { provider: "openrouter", model: "xiaomi/mimo-v2.6-pro", minTier: "standard" },
+    ],
+    chat: [{ provider: "openrouter", model: "~z-ai/glm-flash-latest", minTier: "quick" }],
+  },
   kindMinimumTier: { ...DEFAULT_KIND_MINIMUM_TIER },
   taskKinds: { ...DEFAULT_TASK_KINDS },
   xpremium: { enabled: false },

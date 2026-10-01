@@ -3,9 +3,12 @@ import { readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { COMPASS_ENV_MAP, parseEnvOverrides, type EnvPatch } from "./env.js";
+import { MODEL_FACTS, factsValid, rankedFacts, sliceBands } from "../policy/facts.js";
+import { filterChain, insertPrefer } from "../policy/filter.js";
 import {
   DEFAULT_CONFIG,
   PROFILE_CEILINGS,
+  TIERS,
   TIER_CAPABILITY_FLOOR,
   TIER_THINKING,
   type CompassConfig,
@@ -26,7 +29,6 @@ export interface LoadResult {
   warnings: string[];
 }
 
-const TIERS = ["quick", "standard", "high", "premium", "xpremium"] as const;
 const THINKING_LEVELS: readonly string[] = [
   "off",
   "minimal",
@@ -445,7 +447,61 @@ function applyEnvPatch(base: CompassConfig, patch: EnvPatch): CompassConfig {
   return next;
 }
 
-/** 合併後的自洽性檢查（Part 3.3：只報告，不改值）。 */
+/** `useDefaultModels: false` 的基準：空鏈 + 空專家（Part 3.1）。 */
+function emptyChains(): CompassConfig {
+  return {
+    ...DEFAULT_CONFIG,
+    routes: { quick: [], standard: [], high: [], premium: [], xpremium: [] },
+    kindModels: {},
+  };
+}
+
+/** 有效天花板：顯式 `ceilings` 覆寫優先，否則用 profile 表（Part 9 L2）。 */
+function ceilingFor(config: CompassConfig, tier: (typeof TIERS)[number]): number | null {
+  const own = config.ceilings[tier];
+  if (own !== undefined) return own;
+  return PROFILE_CEILINGS[config.profile][tier] ?? null;
+}
+
+/**
+ * L1 + L2 組合，在 `resolveConfig()` 最後執行（Part 9，優先序由低到高）：
+ *
+ *   1. 事實切帶 — 只填**使用者沒寫過**的層級（`explicit` 條目 = 使用者
+ *      擁有該層，L3 勝出）；事實檔不可用 → 跳過，保留內建鏈（fail-open）
+ *   2. 政策過濾 — `deny` / `allowProviders` 只作用於非顯式條目
+ *   3. `prefer` 插入鏈首 — 顯式，永不被過濾
+ *
+ * 專家鏈與層級鏈都要過濾；`useDefaultModels: false` 時不推導（只用
+ * 使用者自帶的模型），但政策與 prefer 仍然適用。
+ */
+function applyModelPolicy(config: CompassConfig): CompassConfig {
+  // 事實推導只在 `useDefaultModels` 為真時發生（Part 3.1：false = 連內建鏈
+  // 都不存在，不能被事實檔案填回）。
+  const factsUsable = config.useDefaultModels && config.autoRoutes && factsValid(MODEL_FACTS);
+  const bands = factsUsable ? sliceBands(rankedFacts(MODEL_FACTS), TIERS.map((tier) => ceilingFor(config, tier))) : undefined;
+
+  if (bands) {
+    TIERS.forEach((tier, index) => {
+      const own = config.routes[tier];
+      if (own.some((target) => target.explicit)) return; // 使用者擁有此層（L3）
+      const derived = bands[index].map((fact) => ({ provider: fact.provider, model: fact.model }));
+      if (derived.length > 0) config.routes[tier] = derived;
+    });
+  }
+
+  // L2 政策（只碰非顯式）。
+  for (const tier of TIERS) config.routes[tier] = filterChain(config.routes[tier], config);
+  for (const kind of Object.keys(config.kindModels)) {
+    config.kindModels[kind] = filterChain(config.kindModels[kind], config);
+  }
+
+  // L3 `prefer` 最後插入鏈首。
+  for (const tier of TIERS) config.routes[tier] = insertPrefer(config.routes[tier], tier, config);
+  return config;
+}
+
+/**
+ * 合併後的自洽性檢查（Part 3.3：只報告，不改值）。 */
 function invariantWarnings(config: CompassConfig): string[] {
   const warnings: string[] = [];
   const bounded = (label: string, value: number): void => {
@@ -489,11 +545,22 @@ export function loadConfig(
   const file = readJsonFile(options.filePath ?? CONFIG_FILE);
   if (file.warning) warnings.push(file.warning);
 
-  let config: CompassConfig = applyFilePatch(DEFAULT_CONFIG as CompassConfig, file.patch ?? {}, warnings);
-
   const envResult = parseEnvOverrides(env);
   warnings.push(...envResult.warnings);
+
+  // `useDefaultModels: false` 選擇的是**基準鏈**，故必須在合併前判定：
+  // env 先看、再看檔案、最後預設（Part 3.1）。基準一旦確定，檔案裡使用者
+  // 自己寫的 routes/kindModels 仍照常合入——「不要內建」不等於「不要我写的」。
+  const patch = file.patch ?? {};
+  const patchUseDefault = typeof patch.useDefaultModels === "boolean" ? patch.useDefaultModels : undefined;
+  const useDefaults = envResult.overrides.useDefaultModels ?? patchUseDefault ?? DEFAULT_CONFIG.useDefaultModels;
+  const base = useDefaults ? DEFAULT_CONFIG : emptyChains();
+
+  let config: CompassConfig = applyFilePatch(base, patch, warnings);
   config = applyEnvPatch(config, envResult.overrides);
+
+  // L1+L2 組合最後跑，使 env 選的 profile 也能塑造價格帶（Part 9）。
+  config = applyModelPolicy(config);
 
   warnings.push(...invariantWarnings(config));
   return { config, warnings };
