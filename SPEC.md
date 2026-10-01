@@ -823,8 +823,12 @@ push 與 pull_request 皆觸發。
 
    只掃**當時實際存在的路徑**；`scripts/` 要等 Part 13 #7 的
    `refresh-facts.mjs` 建立後才存在，未建立前加進去只会让 grep 回 2。
-   第二條僅允許命中 `classify/cloud.ts` 的 `model: "jev-latest"`
-   （typesafe API 的模型別名，屬第三方 API 事實，見 Part 4.3）。
+   第二條僅允許命中**雲端模型預設代號 `"jev-latest"`**（typesafe API 的
+   模型別名，屬第三方 API 事實，見 Part 4.3）。它實際住在
+   `schema.ts` 的 `DEFAULT_CONFIG.classify.cloud.model`——預設值就該待在
+   預設表裡；`classify/cloud.ts` 是另一個合理位置。兩處皆可，其餘零命中。
+   另允許 `classify/analysis.ts` 檔頭以 `jev.ts` **指名禁讀來源**（Part 0.4
+   要求的出處揭露，不是引用其程式碼）——這是唯一一處允許提上游檔名的地方。
 6. **上游重複區塊審計**（與完成條件「不開啟 Part 0.2 檔案」的衝突已解，見下）：
    實作凍結後，由**未參與實作的程序**（獨立子代理或主代理皆可）對
    Part 0.2 清單逐一跑 diff，`>3 行連續相同即失敗`。

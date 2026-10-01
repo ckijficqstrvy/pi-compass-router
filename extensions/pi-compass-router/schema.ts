@@ -40,6 +40,12 @@ export interface Target {
   minTier?: Tier;
   thinkingLevel?: ThinkingLevel;
   priority?: number;
+  /**
+   * 由 config.json 寫入時標為 true（Part 9 L3）：**顯式設定永不過濾**——
+   * `deny`／`allowProviders`／價格帶／freeOnly 都不碰它。
+   * 內建鏈與 facts 推導的鏈不帶此旗標，因此可被 L1/L2 篩掉。
+   */
+  explicit?: boolean;
 }
 
 /** 任務種類規格（Part 3.1 `taskKinds` 元素）。 */
