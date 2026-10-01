@@ -1,10 +1,9 @@
 # pi-compass — 行為規格 v1（Clean-room 規格檔）
 
-狀態：**BLOCKED — 等待 Part 13 的 7 項決策**
-解除條件：Part 13 每一列都有明確答案，且本檔回填完畢。
-在解除之前不建立任何 `src/` 或 `extensions/pi-compass/` 檔案。
+狀態：**UNBLOCKED — Part 13 七項決策已於 2026-10-01 全數回填**
+進入實作的前置：完成條件段列出的四項檢查全部通過。
 規格者：主代理
-日期：2026-10-01
+日期：2026-10-01（決策回填日：2026-10-01）
 
 本檔是 pi-compass 的**唯一規格來源**。程式碼實作只能依賴本檔與
 「Clean-room 證價清單」所列檔案，不得參照任何被排除的來源。
@@ -99,8 +98,8 @@ tsconfig.json                                     14 行（全新）
 
 ### 0.5 授權與 NOTICE
 
-授權代號由 Part 13 #2 決定；未回覆前不建立 `LICENSE` 檔。
-**NOTICE 檔必須記載：**
+授權為 **MIT**（Part 13 #2 已定）；`LICENSE` 於完成條件第 1 項建立。
+NOTICE 檔必須記載：
 
 - 新程式碼為獨立開發；
 - `model-facts.json`、`facts.ts`、`settings-ui.ts`、`laya*` 等
@@ -108,7 +107,7 @@ tsconfig.json                                     14 行（全新）
 - 對上游專案的功能概念致謝（非程式碼複製）；
 - 0.4 的開發過程揭露。
 
-舊 repo `pi-jev-router` 的預設處置是**保持公開**（Part 13 #4）。
+舊 repo `pi-jev-router` 的處置是**保持公開**（Part 13 #4 已定）。
 無論轉 private 與否，它都繼續攜帶上游 MIT notice——這是法定要求，
 刪除或改寫都會構成授權違反；本新專案與它分開授權。
 
@@ -118,10 +117,12 @@ tsconfig.json                                     14 行（全新）
 
 | 項目 | 值 |
 | --- | --- |
-| 套件名 | `pi-compass` |
-| npm 名 | `pi-compass`（或 scoped：`@<user>/pi-compass`） |
-| 副目錄 | `extensions/pi-compass/` |
-| 命令前綴 | `/compass` |
+| 專案 / repo 名 | `pi-compass`（GitHub `ckijficqstrvy/pi-compass`，已驗證可建） |
+| npm 套件名 | `pi-compass-router`（**已驗證 registry HTTP 404 = 可用**） |
+| 理由 | npm 上的 `pi-compass` 已被 Matt Devy 的同名 Pi 擴充佔用（0.2.2，2026-08-11），同生態系撞名不可採 |
+| 安裝指令 | `pi install npm:pi-compass-router` |
+| 副目錄 | `extensions/pi-compass-router/` |
+| 命令前綴 | `/compass`（**短前綴；套件名與命令名不需一致**——precedent：舊套件 `pi-jev-model-router` 配 `/jev-router`） |
 | 狀態列前綴 | `compass:` |
 | 設定命令 | `/compass-set` |
 | 工具 | `compass_route`、`compass_config` |
@@ -129,11 +130,17 @@ tsconfig.json                                     14 行（全新）
 | 設定檔 | `~/.pi/agent/pi-compass/config.json` |
 | 狀態檔 | `~/.pi/agent/pi-compass/state.json` |
 | 事實檔 | 隨附 `model-facts.json`（可被使用者覆寫） |
-| 命令 | `/compass-route` |
 | 環境變數前綴 | `COMPASS_` |
+| 授權 | **MIT**（Part 13 #2 已定） |
+| npm 發佈 | **公開非 scoped**（Part 13 #3 已定） |
 
-舊前綴 `JEV_` 全部淘汰。環境變數改為 `COMPASS_*`
-（對應表見 Part 3）。
+完整命令集：`/compass`、`/compass-set`、`/compass-route`、
+`/compass-mode`、`/compass-budget`、`/compass-why`、
+`/compass-revert`、`/compass-suggest`、`/compass on|off`。
+
+**發佈前置（未完成不 publish）**：本機 `npm whoami` 回 `ENEEDAUTH`，
+必須先 `npm adduser` 或配 `NPM_TOKEN`；隨後 `npm pack --dry-run`
+驗封包內容，再 `npm publish --access public`。
 
 ---
 
@@ -500,13 +507,12 @@ pressure = max(today÷dailyUsd, month÷monthlyUsd)
 
 ---
 
-## Part 9 — 四層模型政策 [狀態：**依 Part 13 #1 的預設「保留」撰寫**]
+## Part 9 — 四層模型政策 [狀態：**已確認保留 — 2026-10-01**]
 
-> ⚠️ 使用者在功能範圍問題中**未勾選**「保留你現有的四層政策」，
-> 故 Part 13 #1 將此列為阻塞項，預設按「保留」執行。
-> 回覆「刪除」的確定後果：移除本 Part，並把 Stage 3 改為
-> 「專家鏈 → 層級鏈 → 池」三段（不再切價格帶），
-> 同時刪除 `policy/facts.ts`、`policy/model-facts.json`、
+> ✅ 使用者 2026-10-01 回答「保留（規格預設）」，本節全部生效。
+> 選項「刪除」當時已評估並否決，其確定後果留作記錄：移除本 Part、
+> Stage 3 改為「專家鏈 → 層級鏈 → 池」三段（不再切價格帶）、
+> 刪除 `policy/facts.ts`、`policy/model-facts.json`、
 > `scripts/refresh-facts.mjs`，並移除 `test/config.test.ts`
 > （#38 autoRoutes 推導、#109 事實檔校驗）與 `test/model-pick.test.ts`
 > （#223 逾頂上限拒絕、#269 預算壓力夾緊）中的價格帶斷言。
@@ -728,23 +734,34 @@ push 與 pull_request 皆觸發。
 
 ---
 
-## Part 13 — 未決事項
+## Part 13 — 決議紀錄（已全部解除，2026-10-01）
 
-| # | 事項 | 決策者 | 解除動作 | 阻塞範圍 |
-| --- | --- | --- | --- | --- |
-| 1 | **四層政策是否保留**（Part 9） | 使用者 | 回覆「保留」或「刪除」。**未回覆前預設保留**，回覆「刪除」則移除 Part 9 並把 Stage 3 簡化為「專家鏈 → 層級鏈 → 池」三段 | 全部實作 |
-| 2 | LICENSE 授權文字（MIT / 其他）與 NOTICE 措辭 | 使用者 | 回覆授權代號（`MIT`／`Apache-2.0`／其他）；NOTICE 依 Part 0.5 的四段結構生成初稿後由使用者逐段核准 | 寫入 `LICENSE`／`NOTICE` 檔 |
-| 3 | npm publish 策略（公開 / scoped） | 使用者 | 回覆 `public` 或 `scoped:<scope>`；決定後才建立 `package.json` 的 `name` 欄位 | `package.json` 建立、發佈 |
-| 4 | 舊 repo `pi-jev-router` 是否轉 private | 使用者 | 回覆「保持公開」或「轉 private」。本規格的預設是**保持公開**（MIT 要求保留，且公開記錄 attribution 對本專案有利） | 無（與 pi-compass 解耦） |
-| 5 | `xpremium`／`freePool` 預設值 | 使用者 | 本規格已定為 `false`／`false`；回覆「改為開啟」才翻轉 | Part 3 schema 預設值 |
-| 6 | `classify.timeoutMs: 800` 對 cloud 是否過緊 | 使用者 + 實測 | 判定方式固定：以 `test/latency.ts` 對 cloud 後端跑 20 次取 p95。**p95 > 800ms → 改 2000ms**，否則維持 800ms。結論回填 Part 6.1 | `classify.timeoutMs` 預設值 |
-| 7 | 模型預設鏈的具體模型 | 主代理 | 實作 Stage 3 前執行 `npm run refresh-facts -- --dry-run` 取得當日價格與能力分數，依 Part 9 的價格帶切片結果寫入 `routes`，再以 `pi -ne -e <path>` 實測四層皆可切換後定稿 | `routes` 預設值 |
+| # | 事項 | 決議 | 回填位置 |
+| --- | --- | --- | --- |
+| 1 | 四層政策是否保留 | **保留**（選項「刪除」已評估並否決） | Part 9 標題與 ⚠️ 區塊 |
+| 2 | LICENSE 授權 | **MIT**；NOTICE 依 Part 0.5 四段結構撰寫，初稿須經使用者逐段核准後才寫入檔案 | `LICENSE`、`NOTICE`（未建立） |
+| 3 | npm 發佈策略 | **公開非 scoped**，套件名 `pi-compass-router`（`pi-compass` 已被 Matt Devy 同名 Pi 擴充佔用） | Part 1 |
+| 4 | 舊 repo `pi-jev-router` 處置 | **保持公開**；法定須留上游 MIT notice，且公開 attribution 對本專案有利。與 pi-compass 完全解耦 | Part 0.5 |
+| 5 | `xpremium`／`freePool` 預設值 | **皆 `false`**（維持規格原值，未要求翻轉） | Part 3 schema |
+| 6 | `classify.timeoutMs` | **維持 800**；若實測推翻，執行已寫死的判定：`test/latency.ts` 對 cloud 跑 20 次取 p95，`p95 > 800 → 改 2000`，並回填 Part 6.1 | Part 6.1 |
+| 7 | 模型預設鏈 | **未定**，阻塞 Stage 3 實作。解除動作固定：`npm run refresh-facts -- --dry-run` → 依 Part 9 價格帶切片 → 寫入 `routes` → `pi -ne -e` 實測四層可切換 | `routes` 預設值 |
+
+發佈前還需完成的機器側前置（非決策）：npm 登入、`npm pack --dry-run`、
+`pi -ne -e` 載入驗證。
 
 ---
 
 ## 完成條件
 
-規格經 Part 13 的 7 項決策解除 BLOCKED 後進入實作。實作期間：
+本規格的七項決策已於 2026-10-01 全數回填（Part 13 決議紀錄）。
+開始寫第一行程式碼前，先完成：
+
+1. 建立 `LICENSE`（MIT）與 `NOTICE`（Part 0.5 四段），NOTICE 初稿交使用者逐段核准；
+2. 建立 `package.json`（`name: "pi-compass-router"`）與 `tsconfig.json`；
+3. 確認 Part 11 的模組骨架與空殼測試建置通過；
+4. 實作 Stage 3 前先執行 Part 13 #7 的 refresh-facts 流程。
+
+實作期間：
 
 - 不開啟 Part 0.2 列出的任何檔案；
 - 不從 git 歷史取出上游版本對照；

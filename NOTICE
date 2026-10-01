@@ -1,0 +1,66 @@
+# NOTICE — pi-compass-router
+
+本檔案依 SPEC.md Part 0.5 的四段結構撰寫。**初稿，待使用者逐段核准後定稿。**
+
+## 1. 獨立開發
+
+`pi-compass-router`（含 `extensions/pi-compass-router/` 下的全部程式碼）
+為獨立開發的作品，依 MIT 授權（見 `LICENSE`）發佈。
+
+本專案**不複製** `github.com/da-vinci-noob/pi-jev-model-router`
+的程式碼、測試或文件文案。
+
+## 2. 使用者原創檔案的出處聲明
+
+下列檔案由本專案作者從零撰寫，在上游專案的分叉點 `5ca26ca` 不存在：
+
+- `extensions/pi-compass-router/facts.ts`
+- `extensions/pi-compass-router/model-facts.json`
+- `extensions/pi-compass-router/settings-ui.ts`
+- `extensions/pi-compass-router/laya.ts`、`laya-server.py`
+- `scripts/refresh-facts.mjs`
+- `test/` 下的全部測試檔
+- `tsconfig.json`
+
+`model-facts.json` 中的能力分數與價格欄位，數值來源為公開排行榜
+（Artificial Analysis intelligence index、OpenRouter rankings、
+Terminal-Bench）與 pi 的 model catalogue；價格欄位由
+`npm run refresh-facts` 自 pi 的 model catalogue 同步取得，非手抄。
+
+## 3. 對上游專案的功能概念致謝
+
+本專案在**概念層**（非程式碼層）參考並重新實作了下列上游所提出的功能想法。
+這些想法依著作權法不受保護；本專案的對應實作是依 `SPEC.md` 獨立撰寫的：
+
+| 上游 commit（概念來源） | 本專案對應 |
+| --- | --- |
+| `feat: allow different jev providers (#1)` | `SPEC Part 4.3` — `classify.cloud.provider` 可替換 |
+| `feat: add a free-model pool consulted outside the tier scale (#3)` | `SPEC Part 3` + `Part 5 Stage 3` — `freePool.*` |
+| `feat: rank kind specialists with an optional priority (#8)` | `SPEC Part 5 Stage 3` — `specialistPriority` |
+| `feat: add an opt-in, gated xpremium tier above premium (#10)` | `SPEC Part 3` — `xpremium.enabled` |
+| `feat: configure task kinds from JSON (#11)` | `SPEC Part 4.1` — 分類器不得自訂種類，`taskKinds` 設定決定 |
+| `feat: propose routes from a local scores file with /jev-router suggest (#12)` | `SPEC Part 10.1` — `/compass-suggest` |
+
+上游專案本身以 MIT 授權發佈。
+
+## 4. 開發過程揭露
+
+`SPEC.md` Part 0.4 記載：需求分析階段，主代理曾閱讀過上游衍生程式庫
+（使用者 repo `ckijficqstrvy/pi-jev-router`）中的 `config.ts` 檔案
+（該檔約 53% 為上游未變更內容）。
+
+為此採取的補償措施：
+
+1. 規格的 config schema 改以上游衍生檔案中**由作者原創**的
+   `test/config*.test.ts` 為來源，不以 `config.ts` 為來源；
+2. 模組切分（`SPEC.md` Part 11）先於實作定案，不依記憶回溯上游組織方式；
+3. 新專案不沿用上游的檔案路徑、命令前綴（`/jev`）、環境變數前綴（`JEV_`）
+   或套件名；
+4. 實作期間禁止開啟 `SPEC.md` Part 0.2 列出的任何檔案，
+   禁止從 git 歷史取出上游版本對照；
+5. 驗收條件包含對上游檔案的連續相同區塊檢查（>3 行即失敗），
+   見 `SPEC.md` Part 12 第 6 項。
+
+使用者的舊 repo `ckijficqstrvy/pi-jev-router` 是上游的 MIT 派生作品，
+**保持公開**並繼續攜帶上游的 MIT 版權聲明（法定要求）。
+該 repo 與本專案分開授權、分開發佈。
