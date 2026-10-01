@@ -1,0 +1,25 @@
+{
+  "name": "pi-compass-router",
+  "version": "0.1.0",
+  "description": "pi extension that decides which model and thinking level each turn should use, then switches before the turn starts.",
+  "license": "MIT",
+  "type": "module",
+  "keywords": [
+    "pi-package"
+  ],
+  "files": [
+    "extensions",
+    "README.md",
+    "LICENSE",
+    "NOTICE"
+  ],
+  "scripts": {
+    "test": "esbuild test/*.test.ts --bundle --packages=external --platform=node --format=esm --outdir=build/test && node --test build/test/*.test.js",
+    "typecheck": "tsc --noEmit"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "esbuild": "^0.24.0",
+    "typescript": "^5.6.0"
+  }
+}

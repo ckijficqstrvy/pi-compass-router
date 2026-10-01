@@ -133,6 +133,8 @@ NOTICE 檔必須記載：
 | 環境變數前綴 | `COMPASS_` |
 | 授權 | **MIT**（Part 13 #2 已定） |
 | npm 發佈 | **公開非 scoped**（Part 13 #3 已定） |
+| Node 下限 | **≥ 22.19.0**（pi 自身 `engines.node` 要求，已從安裝的 `@earendil-works/pi-coding-agent@0.99.1` package.json 實測；不要寫 20） |
+| pi 官方連結 | `https://github.com/earendil-works/pi`（`pi-mono.com` 實測 DNS 不通 http=000，**不可用**） |
 
 完整命令集：`/compass`、`/compass-set`、`/compass-route`、
 `/compass-mode`、`/compass-budget`、`/compass-why`、
@@ -647,7 +649,7 @@ thinking 的 resolved／judged／**applied after clamp**、
 
 ```
 pi-compass/
-├── extensions/pi-compass/
+├── extensions/pi-compass-router/          # 副目錄名同 Part 1 定案
 │   ├── index.ts              # pi 接線：事件、命令、工具、切換（<500）
 │   ├── schema.ts             # 型別、枚舉、預設值、白名單檢查（純）
 │   ├── config/
@@ -712,11 +714,19 @@ pi-compass/
 
 ```json
 {
-  "test": "esbuild test/*.test.ts --bundle --packages=external --platform=node --format=esm --outdir=node_modules/.cache/jev-tests && node --test node_modules/.cache/jev-tests/*.test.js"
+  "test": "esbuild test/*.test.ts --bundle --packages=external --platform=node --format=esm --outdir=build/test && node --test build/test/*.test.js"
 }
 ```
 
+**輸出目錄必須在 `node_modules` 之外。** 2026-10-01 實測（Node v22.23.2）：
+`node --test node_modules/...` 恒回 `Could not find '<path>'`，即使檔案確實存在
+（11,876 B）——Node 的 test runner 在解析位置參數時排除 `node_modules`。
+非 `node_modules` 路徑的同一檔案：`6 tests, 6 pass, fail 0, exit 0`。
+另一個已踩过的 gotcha：**目錄形式 `node --test build/test`（無尾斜線）會回
+`MODULE_NOT_FOUND`**（被當成模組 require），必须用 glob 形式 `build/test/*.test.js`。
+
 取代現有 13 支指令的字串串接。`typecheck` 保持 `tsc --noEmit`。
+`build/` 加入 `.gitignore`（編譯產物）。
 CI：`.github/workflows/ci.yml`，兩個 job（`typecheck`、`test`），
 push 與 pull_request 皆觸發。
 
@@ -730,7 +740,15 @@ push 與 pull_request 皆觸發。
    `grep -riE '\bJev\b' extensions/ scripts/` 僅允許出現在
    `classify/cloud.ts` 的預設 `model: "jev-latest"`（typesafe API 的模型別名，
    屬第三方 API 事實，見 Part 4.3），其餘零結果
-6. 與上游檔逐一 diff 無逐字相同區塊（>3 行連續相同即失敗）
+6. **上游重複區塊審計**（與完成條件「不開啟 Part 0.2 檔案」的衝突已解，見下）：
+   實作凍結後，由**未參與實作的程序**（獨立子代理或主代理皆可）對
+   Part 0.2 清單逐一跑 diff，`>3 行連續相同即失敗`。
+
+   **方向必须單向**：審計結果只回報 `失敗檔名 + 區塊數 + 行數`，
+   **不得回傳相同區塊的內容**，實作端也**不得**為了修通過而去看上游怎麼寫。
+   失敗的處理是**整段重寫**（換一種自己的表達），不是逐行對齊。
+   實作期間的任何 diff、grep、cat、git show 都是 clean-room 違規，
+   這條驗收只在凍結後執行一次。
 
 ---
 
@@ -739,15 +757,16 @@ push 與 pull_request 皆觸發。
 | # | 事項 | 決議 | 回填位置 |
 | --- | --- | --- | --- |
 | 1 | 四層政策是否保留 | **保留**（選項「刪除」已評估並否決） | Part 9 標題與 ⚠️ 區塊 |
-| 2 | LICENSE 授權 | **MIT**；NOTICE 依 Part 0.5 四段結構撰寫，初稿須經使用者逐段核准後才寫入檔案 | `LICENSE`、`NOTICE`（未建立） |
+| 2 | LICENSE 授權 | **MIT**；`LICENSE`（版权人 `Ethan`，取自 git 身分，如需法定姓名请告知）與 `NOTICE` 四段初稿**已於 2026-10-01 被使用者逐段核准（含第 4 段揭露）**，兩檔已建立並定稿 | `LICENSE`、`NOTICE` ✅ 已完成 |
+| 2b | `NOTICE` 是否隨 npm 包發佈 | **隨包發佈**（預設）——加入 `package.json` 的 `files` 欄，使 attribution 随 tarball 可见；回覆「不隨包」才移除（將只剩 GitHub 可见，不利 attribution） | `package.json` `files` 欄 |
 | 3 | npm 發佈策略 | **公開非 scoped**，套件名 `pi-compass-router`（`pi-compass` 已被 Matt Devy 同名 Pi 擴充佔用） | Part 1 |
 | 4 | 舊 repo `pi-jev-router` 處置 | **保持公開**；法定須留上游 MIT notice，且公開 attribution 對本專案有利。與 pi-compass 完全解耦 | Part 0.5 |
 | 5 | `xpremium`／`freePool` 預設值 | **皆 `false`**（維持規格原值，未要求翻轉） | Part 3 schema |
 | 6 | `classify.timeoutMs` | **維持 800**；若實測推翻，執行已寫死的判定：`test/latency.ts` 對 cloud 跑 20 次取 p95，`p95 > 800 → 改 2000`，並回填 Part 6.1 | Part 6.1 |
 | 7 | 模型預設鏈 | **未定**，阻塞 Stage 3 實作。解除動作固定：`npm run refresh-facts -- --dry-run` → 依 Part 9 價格帶切片 → 寫入 `routes` → `pi -ne -e` 實測四層可切換 | `routes` 預設值 |
 
-發佈前還需完成的機器側前置（非決策）：npm 登入、`npm pack --dry-run`、
-`pi -ne -e` 載入驗證。
+發佈前還需完成的機器側前置（非決策）：npm 登入（本機 `npm whoami` 回 `ENEEDAUTH`）、
+`npm pack --dry-run`、`pi -ne -e` 載入驗證。
 
 ---
 
@@ -756,7 +775,7 @@ push 與 pull_request 皆觸發。
 本規格的七項決策已於 2026-10-01 全數回填（Part 13 決議紀錄）。
 開始寫第一行程式碼前，先完成：
 
-1. 建立 `LICENSE`（MIT）與 `NOTICE`（Part 0.5 四段），NOTICE 初稿交使用者逐段核准；
+1. ✅ 已完成 — `LICENSE`（MIT）與 `NOTICE`（Part 0.5 四段）已建立，NOTICE 於 2026-10-01 經使用者逐段核准；
 2. 建立 `package.json`（`name: "pi-compass-router"`）與 `tsconfig.json`；
 3. 確認 Part 11 的模組骨架與空殼測試建置通過；
 4. 實作 Stage 3 前先執行 Part 13 #7 的 refresh-facts 流程。
