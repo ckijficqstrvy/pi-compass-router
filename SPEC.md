@@ -361,6 +361,27 @@ Judgment     { kind, kindConfidence, complexity, capability,
   （typesafe 之外可接 openrouter、vercel AI 等），
   **由 `classify.cloud.provider` 決定**，介面不變。
 
+#### ⚠️ 線格式未驗證（阻塞 `cloud.ts` 實作）
+
+`parseAnalysis()` 的解析已依 **laya-mlx 官方源碼**驗證（見 `classify/analysis.ts`
+檔頭），但 **cloud 後端的回應 schema 從未驗證**——舊版實作位於禁讀的
+`jev.ts`，不得參照。`analysis.ts` 目前只接受兩種形狀（`{answers: {...}}`
+與裸 answers map），若 typesafe 回的是第三種，cloud 路徑會全數
+fail-open（不崩，但也不路由）。
+
+**解除步驟（實作 `cloud.ts` 之前執行，缺一不可）**：
+
+1. 讀 typesafe.ai 的公開 API 文件，取得 `/v1/systemone` 的回應 schema；
+2. 文件不足時，以測試金鑰實際呼叫一次，**捕獲完整回應並存檔**
+   （`docs/cloud-response.sample.json`，敏感欄位先遮罩）；
+3. 把驗證過的 schema 寫進本節下方的「已驗證線格式」小節；
+4. 若回應既非 `{answers}` 也非裸 map，在 `analysis.ts` 增加第三種形狀的
+   解析——**從捕獲的樣本寫起，不從記憶或猜測**；
+5. 未完成以上任一步前，不實作 `cloud.ts`，`provider: "cloud"` 保持
+   不可用並在狀態列明說。
+
+**已驗證線格式**：（待第 3 步回填）
+
 ### 4.4 安全
 
 - 分類器收到的 payload **僅** `request` 與 `conversation`；
