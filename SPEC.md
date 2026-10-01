@@ -415,12 +415,29 @@ Stage 5  apply       applied           →  pi.setModel / setThinkingLevel + ent
 ### Stage 2 — compose
 
 ```
-demand  = 0.55·complexity + 0.45·capability   (+ reasoning 微調)
+demand  = 0.55·complexity + 0.45·capability + 0.15·deepReasoning
+demand  = clamp(demand, 0, 3)
 demand  = max(demand, taskKinds[kind].floor)
-demand  = max(demand, kindMinimumTier[kind] 對應值)
-tier    = 由 demand 與 ceilings 切出
+demand  = max(demand, TIER_DEMAND_FLOOR[kindMinimumTier[kind]])
+tier    = DEMAND_TIER(demand) max kindMinimumTier[kind]
 thinking = pin > judgment.thinking > demand ladder > tier 預設
 ```
+
+> 2026-10-01 補齊三處原先未定義的量（寫 `route/compose.ts` 前補）：
+>
+> 1. **reasoning 微調公式** `+ 0.15·deepReasoning`——最多只加 0.15，
+>    不足以单独把任务跨层级，只在边界上把高等级推向深思考；
+>    `deepReasoning` 缺失时该项不加。随后 clamp 到 [0,3]，
+>    让 demand 永远落在阶梯刻度内。
+> 2. **`TIER_DEMAND_FLOOR`**——層級對應的數值需求下限：
+>    `quick 0.5 / standard 1.5 / high 2.5 / premium 2.9 / xpremium 3.0`。
+>    取值與階梯閾值同源，故「plan ≥ high」意指 demand 至少 2.5
+>    （至少 medium 思考），而不是任意数字。
+> 3. **tier 由 demand 切出，不是由 ceilings**。原句「由 demand 與
+>    ceilings 切出」有誤——`ceilings` 是 Part 9 的**價格帶**，決定某層
+>    裡放哪些模型（Stage 3），不決定需求落在哪一层。
+>
+> 另補：`xpremium.enabled === false` 時 tier 封頂在 `premium`。
 
 demand ladder（實作常數，定義在 `route/compose.ts`；修改任一閾值
 必須回填本檔並註記日期）：
@@ -430,8 +447,15 @@ demand ladder（實作常數，定義在 `route/compose.ts`；修改任一閾值
 tier 預設 `TIER_THINKING`：`quick: off / standard: low / high: medium /
 premium: high / xpremium: max`。
 
-**信心守衛**：`kindConfidence < confidenceThreshold` 且建議層級 > standard
-→ 落回 `standard`。
+**信心守衛（在階梯之後，且優先於層級 floor）**：
+`kindConfidence < confidenceThreshold` 時，**無論 `kindMinimumTier` 給什麼**，
+tier 一律落回 `standard`。理由：信心低代表「連這是不是 plan 都不確定」，
+此時依賴種類下限去花 high 的錢，是把不確定性放大。這覆蓋了
+「planning 不下 cheap」的常規——兩者衝突時**信心優先**。
+
+`judgment === undefined`（分類逾時／失敗）時：demand 記 0、
+tier 直接 `standard`、thinking 取 `TIER_THINKING[standard]`，
+**不套用任何種類 floor**（kind 未知）。
 
 ### Stage 3 — select
 
