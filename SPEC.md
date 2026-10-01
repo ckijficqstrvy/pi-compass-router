@@ -223,6 +223,36 @@ pi-compass 是一個 pi 擴充，在每一輪對話**開始之前**判斷該用�
 
 `thinkingLevel` 可能值：`off｜minimal｜low｜medium｜high｜xhigh｜max`
 
+### 3.1a 內建任務種類（`taskKinds` 預設內容）
+
+> 2026-10-01 補：原先只寫「內建」，骨架階段被正確標為規格缺口。
+> 種類中繼資料與模型鏈無關，不受 Part 13 #7 阻塞，故在此定案。
+
+`floor` 是 **demand 下限**（0–3 刻度），語意是「這類任務永遠不會被
+當成瑣事」；它與 `kindMinimumTier` 的**層級下限**是兩回事（Part 5 Stage 2
+先取 demand floor 再取層級 floor）。demand floor 影響思考階梯與
+hardRatio 的 `demand ≥ 2.5` 例外；層級 floor 直接決定候選鏈起點。
+
+| kind | label（供 UI/選單） | floor | 層級下限（`kindMinimumTier`） |
+| --- | --- | --- | --- |
+| `plan` | Planning & design | **1.5** | high |
+| `review` | Review & audit | **1.5** | high |
+| `implement` | Implementation | **1.0** | standard |
+| `debug` | Debugging | **1.0** | standard |
+| `refactor` | Refactoring | **1.0** | standard |
+| `research` | Research | **1.0** | standard |
+| `operate` | Operation & tooling | **0.5** | standard |
+| `write` | Writing | **0.5** | quick |
+| `explain` | Explanation | **0.5** | quick |
+| `chat` | Conversation | **0.0** | quick |
+
+設計理由：`plan`／`review` 需長程推理故 floor 最高；`chat` 不設 floor。
+分類器的 `criteria` 用 **kind key**（非 label）作答——key 穩定、短、
+易驗證，label 只用於顯示。
+
+`taskKinds` 可由 JSON 完全覆寫（新增自己的 domain），覆寫後
+`kindMinimumTier` 與 `kindModels` 需自行搭配（Part 11 移植 #11）。
+
 ### 3.2 解析順序
 
 後者勝：
@@ -303,6 +333,11 @@ Judgment     { kind, kindConfidence, complexity, capability,
 
 `kind` 必須屬於呼叫端傳入的 `kinds` 集合 — 分類器不能自訂種類
 （種類由 `taskKinds` 設定決定，移植 #11）。
+
+`complexity` 與 `capability` 規範在 **0–3 刻度**（Stage 2 的 demand 與
+階梯閾值 0.5/1.5/2.5/2.9 都建立在此範圍上）；laya 回的是 rubric 層級
+期望值，故以 `score / (k-1) * 3` 正規化，結果**收斂到 4 位小數**
+（與來源資料精度一致，避免 1.55 → 1.5500000000000003 的浮點噪聲）。
 
 ### 4.2 laya 後端（預設）
 
@@ -446,6 +481,21 @@ mode 決定 Stage 5 動作：
 `classify.timeoutMs` 預設自 3500 → **800**：
 local-first 之後，cloud 超過 800ms 就沒有理由繼續等——
 Fail-open 比讓使用者等 3.5 秒好。
+
+**laya-mlx 官方效能數據（判斷 80ms 門樓是否有餘裕用）**：
+來源 `github.com/mizorewww/laya-mlx` README，M3 Max、FP16、排除模型載入：
+
+| 指標 | Laya 421M | Multilingual 322M |
+| --- | --- | --- |
+| 一題短問題 P50 | 13.42 ms | **7.39 ms** |
+| 一題短問題 P95 | 13.92 ms | **7.79 ms** |
+| 50 題吞吐 | 146.8 q/s | 395.0 q/s |
+
+我們的五題是**同一批次內的獨立列**（laya-mlx 原文：question rows are
+batched independently，batch_size 預設 16），故五題成本接近一題而非五倍。
+驗收仍用 **p95 < 80ms 端到端**（含 JSONL 往返與橋行程式開銷）——
+這是我们**自己的實測驗收值**，不是引用上游數字；實測後若餘裕充足，
+再把門檻下收並在此節記入實測值。
 
 ### 6.2 分類快取（**新功能，舊版沒有**）
 
@@ -656,7 +706,10 @@ pi-compass/
 │   │   ├── load.ts           # 三層解析、warnings、env 驗證
 │   │   └── env.ts            # COMPASS_* 定義與 parse
 │   ├── classify/
-│   │   ├── types.ts          # Classifier 介面、Judgment
+│   │   ├── types.ts          # Classifier 介面、Judgment、ClassifyInput
+│   │   ├── analysis.ts       # buildQuestions + parseAnalysis + sanitizeRemote
+│   │   │                     #   （新增 2026-10-01：這三個函式原屬禁讀的
+│   │   │                     #   `jev.ts`，由本檔重新實作）
 │   │   ├── cache.ts          # 分類快取（Part 6.2）
 │   │   ├── laya.ts           # 本機 bridge
 │   │   ├── cloud.ts          # cloud 後端（可替換 provider）
@@ -703,6 +756,7 @@ pi-compass/
 | `settings-ui.test.ts` | 你的（全新） | 標籤往返、驗證、寫入備份 |
 | `latency.ts` | 你的（全新） | 分類延遲量測 |
 | `pipeline.test.ts` | **新增** | Stage 1–5 各自的純函式 |
+| `analysis.test.ts` | **新增**（2026-10-01 補） | 問題集建構、laya 回應解析、score→0–3 正規化、非法種類拒絕、`sanitizeRemote` 上限 |
 | `cache.test.ts` | **新增** | 快取命中／TTL／LRU／config 失效 |
 | `suggest.test.ts` | **新增** | 分數檔 → 路由提議 |
 | `budget.test.ts` | **新增** | soft/hard 壓力、demand ≥2.5 例外 |

@@ -14,6 +14,7 @@ import * as index from "../extensions/pi-compass-router/index.js";
 import * as load from "../extensions/pi-compass-router/config/load.js";
 import * as env from "../extensions/pi-compass-router/config/env.js";
 import * as cache from "../extensions/pi-compass-router/classify/cache.js";
+import * as analysis from "../extensions/pi-compass-router/classify/analysis.js";
 import * as laya from "../extensions/pi-compass-router/classify/laya.js";
 import * as cloud from "../extensions/pi-compass-router/classify/cloud.js";
 import * as compose from "../extensions/pi-compass-router/route/compose.js";
@@ -112,8 +113,13 @@ test("every module exposes its skeleton exports", () => {
     ["config/load", load.validatePatch, "function"],
     ["config/env", env.parseEnvOverrides, "function"],
     ["classify/cache", cache.cacheKey, "function"],
-    ["classify/cache", cache.cacheGet, "function"],
-    ["classify/cache", cache.cacheSet, "function"],
+    ["classify/cache", cache.configGeneration, "function"],
+    ["classify/cache", cache.normalizeRequest, "function"],
+    ["classify/cache", cache.ClassificationCache, "function"],
+    ["classify/analysis", analysis.buildQuestions, "function"],
+    ["classify/analysis", analysis.parseAnalysis, "function"],
+    ["classify/analysis", analysis.sanitizeRemote, "function"],
+    ["classify/analysis", analysis.ClassifyError, "function"],
     ["classify/laya", laya.createLayaClassifier, "function"],
     ["classify/cloud", cloud.createCloudClassifier, "function"],
     ["route/compose", compose.compose, "function"],

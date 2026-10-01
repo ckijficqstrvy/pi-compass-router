@@ -148,11 +148,28 @@ export const DEFAULT_KIND_MINIMUM_TIER: Readonly<Record<string, Tier>> = {
 };
 
 /**
+ * 內建任務種類（SPEC Part 3.1a）。`floor` 是 demand 下限（0–3 刻度），
+ * 與 `kindMinimumTier` 的層級下限是兩回事。
+ */
+export const DEFAULT_TASK_KINDS: Readonly<Record<string, TaskKindSpec>> = {
+  plan: { label: "Planning & design", floor: 1.5 },
+  review: { label: "Review & audit", floor: 1.5 },
+  implement: { label: "Implementation", floor: 1.0 },
+  debug: { label: "Debugging", floor: 1.0 },
+  refactor: { label: "Refactoring", floor: 1.0 },
+  research: { label: "Research", floor: 1.0 },
+  operate: { label: "Operation & tooling", floor: 0.5 },
+  write: { label: "Writing", floor: 0.5 },
+  explain: { label: "Explanation", floor: 0.5 },
+  chat: { label: "Conversation", floor: 0.0 },
+};
+
+/**
  * 預設設定（SPEC Part 3.1 預設欄）。
  *
- * 規格缺口：`routes`、`kindModels`、`taskKinds` 的內建內容未在 SPEC 給出
- * （模型預設鏈被 Part 13 #7 明列為未定案），骨架以空候選鏈呈現，
- * 不自行猜測鏈內容。
+ * 規格缺口：`routes`、`kindModels` 的內建內容未在 SPEC 給出（模型預設鏈被
+ * Part 13 #7 明列為未定案），骨架以空候選鏈呈現，不自行猜測鏈內容。
+ * `taskKinds` 已於 2026-10-01 由 SPEC Part 3.1a 補齊（見 DEFAULT_TASK_KINDS）。
  */
 export const DEFAULT_CONFIG: CompassConfig = {
   enabled: true,
@@ -176,7 +193,7 @@ export const DEFAULT_CONFIG: CompassConfig = {
   routes: { quick: [], standard: [], high: [], premium: [], xpremium: [] },
   kindModels: {},
   kindMinimumTier: { ...DEFAULT_KIND_MINIMUM_TIER },
-  taskKinds: {},
+  taskKinds: { ...DEFAULT_TASK_KINDS },
   xpremium: { enabled: false },
   freePool: { enabled: false, models: [] },
   specialistPriority: {},
