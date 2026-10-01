@@ -2,6 +2,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 
 import { DEMAND_LADDER, TIER_DEMAND_FLOOR, compose } from "../extensions/pi-compass-router/route/compose.js";
+import { guard, type GuardRequest, type GuardState } from "../extensions/pi-compass-router/route/guard.js";
 import { filterChain, insertPrefer } from "../extensions/pi-compass-router/policy/filter.js";
 import { DEFAULT_CONFIG } from "../extensions/pi-compass-router/schema.js";
 import type { CompassConfig, Target } from "../extensions/pi-compass-router/schema.js";
@@ -204,4 +205,170 @@ test("a prefer head survives a deny that matches it (explicit beats policy)", ()
   const cfg = config({ prefer: { quick: ["anthropic/claude-opus-latest"] }, deny: ["*claude-opus*"] });
   const out = insertPrefer(filterChain(targets, cfg), "quick", cfg);
   assert.equal(out[0].model, "anthropic/claude-opus-latest", "prefer is injected after filtering and never filtered");
+});
+
+// ---------------------------------------------------------------------------
+// Stage 4 — guard
+// ---------------------------------------------------------------------------
+
+function state(overrides: Partial<GuardState> = {}): GuardState {
+  return {
+    currentModel: null,
+    currentTier: null,
+    todayUsd: 0,
+    monthUsd: 0,
+    lastSwitchAtMs: null,
+    ...overrides,
+  };
+}
+
+function request(tier: GuardRequest["tier"], demand: number, model = "openrouter/target-model"): GuardRequest {
+  return { target: { provider: "openrouter", model }, tier, demand };
+}
+
+test("guard: stickiness holds when the current model is already the target", () => {
+  const result = guard(request("high", 2.8, "openrouter/m1"), state({ currentModel: "openrouter/m1", currentTier: "high" }), config(), "auto");
+  assert.equal(result.outcome, "held");
+  assert.equal(result.tier, "high");
+  assert.match(String(result.reason), /stickiness/);
+});
+
+test("guard: an affordable turn applies unchanged", () => {
+  const result = guard(request("high", 2.8), state(), config(), "auto");
+  assert.equal(result.outcome, "applied");
+  assert.equal(result.tier, "high");
+});
+
+test("guard: soft budget pressure drops exactly one tier", () => {
+  // 3.6 / 5 = 0.72 >= softRatio 0.7, below hardRatio 0.9
+  const result = guard(request("high", 2.8), state({ todayUsd: 3.6 }), config(), "auto");
+  assert.equal(result.outcome, "applied");
+  assert.equal(result.tier, "standard");
+  assert.match(String(result.reason), /soft ratio/);
+});
+
+test("guard: hard budget pressure forces quick when demand is low", () => {
+  // 4.6 / 5 = 0.92 >= hardRatio 0.9, demand 1.0 < 2.5
+  const result = guard(request("high", 1.0), state({ todayUsd: 4.6 }), config(), "auto");
+  assert.equal(result.tier, "quick");
+  assert.match(String(result.reason), /hard ratio/);
+});
+
+test("guard: hard pressure still allows standard when demand >= 2.5", () => {
+  const result = guard(request("premium", 2.6), state({ todayUsd: 4.6 }), config(), "auto");
+  assert.equal(result.tier, "standard", "architectural turns may stay at standard (Part 8)");
+});
+
+test("guard: hard pressure never raises a tier that was already cheaper", () => {
+  const result = guard(request("quick", 1.0), state({ todayUsd: 4.6 }), config(), "auto");
+  assert.equal(result.tier, "quick");
+  assert.equal(result.outcome, "applied");
+});
+
+test("guard: an uncapped budget never downgrades", () => {
+  const uncapped = config({ budget: { dailyUsd: null, monthlyUsd: null, softRatio: 0.7, hardRatio: 0.9 } });
+  const result = guard(request("premium", 3), state({ todayUsd: 1e9, monthUsd: 1e9 }), uncapped, "auto");
+  assert.equal(result.tier, "premium");
+});
+
+test("guard: notify mode reports the suggestion without applying it", () => {
+  const result = guard(request("high", 2.8), state(), config(), "notify");
+  assert.equal(result.outcome, "notify-only");
+  assert.equal(result.tier, "high");
+});
+
+test("guard: confirm mode still reaches the caller as applied (Stage 5 asks)", () => {
+  const result = guard(request("high", 2.8), state(), config(), "confirm");
+  assert.equal(result.outcome, "applied");
+});
+
+test("guard: an over-cap cache penalty holds the switch", () => {
+  const result = guard(
+    request("high", 2.8),
+    state({ currentTier: "standard", cachePenaltyUsd: 0.2 }),
+    config(),
+    "auto",
+  );
+  assert.equal(result.outcome, "held");
+  assert.equal(result.tier, "standard");
+  assert.match(String(result.reason), /cache miss/);
+});
+
+test("guard: bypassTierDelta overrides the cache penalty cap", () => {
+  const cfg = config({ cache: { ...DEFAULT_CONFIG.cache, bypassTierDelta: 1 } });
+  const result = guard(
+    request("high", 2.8),
+    state({ currentTier: "standard", cachePenaltyUsd: 0.2 }),
+    cfg,
+    "auto",
+  );
+  assert.equal(result.outcome, "applied", "a quality-critical jump is exempt from the penalty cap");
+});
+
+test("guard: an unknown cache penalty never blocks (fail open)", () => {
+  const result = guard(request("high", 2.8), state({ currentTier: "standard" }), config(), "auto");
+  assert.equal(result.outcome, "applied");
+});
+
+test("guard: deadband holds a marginal upward switch", () => {
+  // demand 2.5 < floor(high) 2.5 + deadband 0.25
+  const result = guard(request("high", 2.5), state({ currentTier: "standard" }), config(), "auto");
+  assert.equal(result.outcome, "held");
+  assert.equal(result.tier, "standard");
+  assert.match(String(result.reason), /deadband/);
+});
+
+test("guard: deadband does not apply on the session's first switch", () => {
+  const result = guard(request("high", 2.5), state({ currentTier: null }), config(), "auto");
+  assert.equal(result.outcome, "applied", "nothing flaps yet, so there is nothing to damp");
+});
+
+test("guard: cooldown blocks a switch until it expires", () => {
+  const cfg = config({ cache: { ...DEFAULT_CONFIG.cache, cooldownSeconds: 300 } });
+  const result = guard(
+    request("high", 3.0),
+    state({ currentTier: "standard", lastSwitchAtMs: Date.now() - 1000 }),
+    cfg,
+    "auto",
+  );
+  assert.equal(result.outcome, "held");
+  assert.match(String(result.reason), /cooldown/);
+});
+
+test("guard: a hard-budget downgrade is exempt from cooldown", () => {
+  const cfg = config({ cache: { ...DEFAULT_CONFIG.cache, cooldownSeconds: 300 } });
+  const result = guard(
+    request("high", 1.0),
+    state({ currentTier: "standard", todayUsd: 4.6, lastSwitchAtMs: Date.now() - 1000 }),
+    cfg,
+    "auto",
+  );
+  assert.equal(result.outcome, "applied", "hard-ratio downgrades bypass the cooldown (Part 7)");
+  assert.equal(result.tier, "quick");
+});
+
+test("guard: a big tier jump is exempt from cooldown", () => {
+  const cfg = config({ cache: { ...DEFAULT_CONFIG.cache, cooldownSeconds: 300 } });
+  const result = guard(
+    request("premium", 3.0),
+    state({ currentTier: "quick", lastSwitchAtMs: Date.now() - 1000 }),
+    cfg,
+    "auto",
+  );
+  assert.equal(result.outcome, "applied", "delta >= bypassTierDelta is quality-critical");
+});
+
+test("guard: a budget-forced downgrade bypasses the deadband", () => {
+  // soft 降級 high → standard，delta = 1 < bypassTierDelta 2，故 bypass 不生效；
+  // demand 2.4 > floor(high)=2.5 − deadband 0.25 = 2.25，落在死區內。
+  // 若預算降級不豁免 deadband，這裡會被擋回 high。
+  const result = guard(
+    request("high", 2.4),
+    state({ currentTier: "high", todayUsd: 3.6 }),
+    config(),
+    "auto",
+  );
+  assert.equal(result.outcome, "applied", "money constraint beats demand uncertainty");
+  assert.equal(result.tier, "standard");
+  assert.match(String(result.reason), /soft ratio/);
 });

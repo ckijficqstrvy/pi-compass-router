@@ -152,6 +152,6 @@ test("every module exposes its skeleton exports", () => {
 });
 
 test("skeleton functions throw not-implemented", () => {
+  // 尚未實作的入口（其餘模組已落地，見各模組測試）。
   assert.throws(() => index.register(), /not implemented/);
-  assert.throws(() => budget.computePressure({ todayUsd: 0, monthUsd: 0 }, DEFAULT_CONFIG), /not implemented/);
 });

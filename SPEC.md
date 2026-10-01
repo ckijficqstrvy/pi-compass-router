@@ -501,6 +501,30 @@ mode 決定 Stage 5 動作：
 `not applied (notify mode)`。
 `held`／`skipped` 在**所有模式**下都套用 thinking（修正陳舊思考）。
 
+#### 實作契約（2026-10-01 補，寫 guard 前定）
+
+規格原本沒寫三個必要輸入，導致「可用性」「demand ≥ 2.5 例外」「deadband
+數值」都無從實作：
+
+1. **可用性不在 `guard()` 裡**——`guard` 沒有 model registry 的存取權。
+   可用性改由**呼叫端在候選鏈上做**：Stage 3 產出有序鏈，Stage 5/`apply`
+   逐個試到第一個「存在且已認證」的模型。`guard()` 只處理 2–5 項。
+   行為不變，只是職責邊界寫明。
+2. **輸入型別**：`guard(request, state, config, mode)`，
+   `request = { target, tier, demand }`——`demand` 是 hardRatio
+   「`≥2.5` 可留 standard」例外必需；`state` 多了可選的
+   `cachePenaltyUsd`（由有價格與 context 的呼叫端算好傳入，
+   因為 `guard` 也不拿不到 token 數與費率）。
+3. **deadband 的數值定義**（原句只有「需超出當前層 ±deadband」）：
+   - **上切** `currentTier → target`：需 `demand >= TIER_DEMAND_FLOOR[target] + deadband`
+   - **下切**：需 `demand <= TIER_DEMAND_FLOOR[當前層] - deadband`
+   - **`state.currentTier` 為 null（本 session 首次切換）→ 不套 deadband**——
+     deadband 是抑制反覆橫跳的，首次没有横跳可抑制；
+     否則 plan 的 2.5 會被 0.25 死區擋在 standard，種類下限形同虛設。
+   - **預算強制的升降級豁免 deadband**（2026-10-01 補）：錢的約束優先於
+     「需求不確定性」，與它已有的 cooldown 豁免一致；否則 soft/hard
+     降級會先被死區擋住，預算政策形同虛設。
+
 ### Stage 5 — apply
 
 - `pi.setModel(...)` + `pi.setThinkingLevel(...)`，之後 **read back**
