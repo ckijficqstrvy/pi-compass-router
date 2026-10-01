@@ -372,3 +372,116 @@ test("guard: a budget-forced downgrade bypasses the deadband", () => {
   assert.equal(result.tier, "standard");
   assert.match(String(result.reason), /soft ratio/);
 });
+// ---------------------------------------------------------------------------
+// Stage 5 — apply
+// ---------------------------------------------------------------------------
+
+import { applyRoute, type ApplyDecision, type ApplyHooks } from "../extensions/pi-compass-router/route/apply.js";
+import type { RouteEntry } from "../extensions/pi-compass-router/ui/entries.js";
+
+function decision(overrides: Partial<ApplyDecision> = {}): ApplyDecision {
+  return {
+    outcome: "applied",
+    target: { provider: "openrouter", model: "m" },
+    thinking: "high",
+    mode: "auto",
+    tier: "high",
+    ...overrides,
+  };
+}
+
+/** 記錄呼叫的 hooks；`failModel` 讓 setModel 拋錯（驗證 fail-open）。 */
+function hooks(overrides: Partial<ApplyHooks> & { failModel?: boolean } = {}) {
+  const calls: { model?: string; thinking?: string; entries: RouteEntry[] } = { entries: [] };
+  const h: ApplyHooks = {
+    setModel(model: string) {
+      if (overrides.failModel) throw new Error("boom");
+      calls.model = model;
+    },
+    setThinkingLevel(level: string) {
+      calls.thinking = level;
+    },
+    readThinkingLevel: overrides.readThinkingLevel ?? (() => "high"),
+    writeEntry: (entry: RouteEntry) => {
+      calls.entries.push(entry);
+    },
+    ...overrides,
+  };
+  return { h, calls };
+}
+
+test("apply: auto + applied switches the model, applies thinking, reads back", async () => {
+  const { h, calls } = hooks();
+  const result = await applyRoute(decision({ mode: "auto" }), h);
+  assert.equal(result.applied, true);
+  assert.equal(calls.model, "openrouter/m");
+  assert.equal(calls.thinking, "high");
+  assert.equal(result.appliedThinking, "high", "read back after clamp");
+  assert.equal(result.symbol, "→");
+  assert.equal(result.needsConfirm, false);
+  assert.equal(calls.entries.length, 1, "entry written");
+  assert.equal(calls.entries[0].thinking?.applied, "high");
+});
+
+test("apply: notify does not switch and does not apply thinking", async () => {
+  const { h, calls } = hooks();
+  const result = await applyRoute(decision({ mode: "notify", reason: "budget soft" }), h);
+  assert.equal(result.applied, false, "notify never calls setModel");
+  assert.equal(calls.model, undefined);
+  assert.equal(calls.thinking, undefined, "notify mode does not touch thinking");
+  assert.equal(result.symbol, "•");
+  assert.match(String(calls.entries[0].reason), /not applied \(notify mode\)/);
+});
+
+test("apply: confirm flags needsConfirm without blocking on a question", async () => {
+  const { h, calls } = hooks();
+  const result = await applyRoute(decision({ mode: "confirm" }), h);
+  assert.equal(result.needsConfirm, true, "index.ts asks, apply does not block");
+  assert.equal(result.applied, false, "no model change before the user confirms");
+  assert.equal(calls.model, undefined);
+  assert.equal(result.symbol, "→", "still a switch (pending confirmation)");
+});
+
+test("apply: held applies thinking but never the model, in every mode", async () => {
+  for (const mode of ["auto", "confirm", "notify"] as const) {
+    const { h, calls } = hooks();
+    const result = await applyRoute(decision({ outcome: "held", mode }), h);
+    assert.equal(result.applied, false);
+    assert.equal(calls.model, undefined, `held never switches in ${mode}`);
+    assert.equal(calls.thinking, "high", `held applies thinking in ${mode} (stale-thinking fix)`);
+    assert.equal(result.symbol, "=");
+  }
+});
+
+test("apply: skipped writes an entry with the reason and applies thinking", async () => {
+  const { h, calls } = hooks();
+  const result = await applyRoute(decision({ outcome: "skipped", skipReason: "continuation" }), h);
+  assert.equal(result.symbol, "×");
+  assert.equal(calls.model, undefined);
+  assert.equal(calls.thinking, "high");
+  assert.equal(calls.entries[0].reason, "continuation");
+});
+
+test("apply: a failing setModel never throws and is captured, fail-open", async () => {
+  const { h, calls } = hooks({ failModel: true });
+  const result = await applyRoute(decision({ mode: "auto" }), h);
+  assert.equal(result.failed, true);
+  assert.equal(result.applied, false);
+  assert.match(String(result.error), /apply failed: boom/);
+  assert.equal(calls.thinking, undefined, "thinking untouched after a model failure");
+  assert.equal(calls.entries.length, 1, "entry still written for visibility");
+});
+
+test("apply: a missing readThinkingLevel leaves appliedThinking unset (no false success)", async () => {
+  const { h } = hooks({ readThinkingLevel: undefined });
+  const result = await applyRoute(decision({ mode: "auto" }), h);
+  assert.equal(result.applied, true);
+  assert.equal(result.appliedThinking, undefined, "do not fake a clamp readback");
+  assert.equal(result.entry.thinking?.applied, undefined);
+});
+
+test("apply: a prefer entry with an empty provider passes the bare model id", async () => {
+  const { h, calls } = hooks();
+  await applyRoute(decision({ target: { provider: "", model: "~z-ai/glm-latest", explicit: true } }), h);
+  assert.equal(calls.model, "~z-ai/glm-latest", "empty provider → bare id (targetKey)");
+});

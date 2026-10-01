@@ -1,6 +1,23 @@
-// policy/filter.ts — L2 政策過濾：deny / allowProviders / prefer
+// policy/filter.ts — L2 政策過濾：deny / allowProviders / prefer / 價格帶天花板
 //（SPEC Part 9 四層政策、Part 5 Stage 3）。
-import type { CompassConfig, Target } from "../schema.js";
+import { PROFILE_CEILINGS, type CompassConfig, type Profile, type Target, type Tier } from "../schema.js";
+
+/**
+ * 某層的生效天花板（$\/M，`input+2×output`）：顯式 `ceilings[tier]` 覆寫
+ * 優先，否則用 `profile` 表（Part 9 價格帶表），無對應 → `null`（∞）。
+ *
+ * 原為 `config/load.ts` 的私有函式；Stage 3 menu gate 第 5 道（價格在該層
+ * 價格帶內）同樣需要它，故上提到 L2 政策的家。load 與 select 都 import 這裡，
+ * 不會違反 Part 11 相依方向（兩者皆在 `config`/`policy` 層，均低於 `route`）。
+ */
+export function ceilingFor(
+  config: Pick<CompassConfig, "ceilings" | "profile">,
+  tier: Tier,
+): number | null {
+  const own = config.ceilings[tier];
+  if (own !== undefined) return own;
+  return PROFILE_CEILINGS[config.profile as Profile][tier] ?? null;
+}
 
 /**
  * glob → RegExp：`*` 為任意字元（含 `/`），其餘正規表示元一律跳脫，

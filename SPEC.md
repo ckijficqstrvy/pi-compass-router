@@ -468,13 +468,50 @@ tier 直接 `standard`、thinking 取 `TIER_THINKING[standard]`，
 3. `freePool.models`（`freePool.enabled` 且當前層無可用模型時，移植 #3）
 4. `freeOnly` 情境下的全域免費池（最強免費模型）
 
-`modelPick: "menu"` 時，分類器的 `modelPick` 選項**先於上述所有**，
-但必須同時通過：存在於 registry、通過 `deny`/`allowProviders`、
-**已評分**（或 `allowUnratedPicks`）、capability ≥ 該層下限
-（quick 20 / standard 35 / high 38 / premium 44 / xpremium 46）、
-價格在該層價格帶內。任一失敗 → 記 `notes` 並退回鏈。
+> 2026-10-01 補（寫 `route/select.ts` 前定，同 Stage 2/4「先補規格」先例）：
+> 原句「freeOnly 情境下的全域免費池」**沒有定義這個池從哪來**。
+> 實測：`model-facts.json` 的 16 筆事實中**零元模型 0 筆**（全部有價），
+> 故 `freeOnly` 無法從事實檔取材；`freePool.models` 又是 `freePool.enabled`
+> 才進場的**另一個**池。二者若混用，`freeOnly`（預設關的特殊情境）
+> 會意外吃到 `freePool`。
+>
+> **定案**：`freeOnly` 與 `freePool` 是**兩個獨立的池**，不得互相代用：
+>
+> - `freePool`（移植 #3）— 使用者在 `freePool.models` 寫的候選，
+>   `freePool.enabled` 為真時才進場（上列第 3 項，且僅在當前層無候選時）。
+> - `freeOnly`（`freeOnly: true` 的特殊情境）— 取**事實檔中
+>   `price.input == 0 && price.output == 0` 的模型**，依 `rankedFacts`
+>   （能力降序）排列，代表「最強免費模型」。事實檔無零元模型 →
+>   **回退到 `freePool.models`**（若 `freePool.enabled`），再無 →
+>   回退到 `routes[tier]`（fail-open：不因沒有免費模型就無路由）。
+>
+> `freeOnly` 時上列 1–3 項**全部跳過**（它的情境語意是「只用 $0 模型」，
+> 專家鏈與層級鏈都是有價模型）。`explicit` 條目**仍不排除**——
+> Part 2「顯式勝過政策」優先於 `freeOnly`（`freeOnly` 是 L2 政策，
+> 而 `explicit` 是 L3）。`prefer` 也不受影響（同樣 L3、永不被過濾）。
 
-**tier 選項內的可用性回退**：整條鏈都不可用 → 用最近的可用層級。
+`modelPick: "menu"` 時，分類器的 `modelPick` 選項**先於上述所有**，
+但必須同時通過六道閘（任一失敗 → 記 `notes` 並退回鏈）：
+
+| 閘 | 判定 | 失敗 notes（供 entry 展開，Part 10.4） |
+| --- | --- | --- |
+| 1 registry | `factFor(provider, model)` 有此事實，**或**條目是 `explicit`（使用者寫的，事實檔不負責） | `not in registry` |
+| 2 deny/allowProviders | `filterChain` 不移除它（`explicit` 永過） | `denied by policy` |
+| 3 已評分 | `factFor(...)` 存在（`allowUnratedPicks: true` 時跳過此閘） | `unrated model` |
+| 4 capability | 事實的 `capability >= TIER_CAPABILITY_FLOOR[tier]` | `capability N below floor M` |
+| 5 價格帶 | `blendedOf(price) <= ceilingFor(tier)`（`profile`/`ceilings` 生效值） | `price over ceiling` |
+| 6 型別 | `judgment.modelPick` 是 menu id（`parseAnalysis` 已保證在 `menuKeys` 內） | `unknown menu id` |
+
+**menu id 的形狀（2026-10-01 補）**：menu 是 `Target[]`，其 id **不是自由字串**，
+而是 `"<provider>/<model>"`（`provider` 為空字串時即裸 `model`——
+`prefer` 注入的條目就是這個形狀）。`parseAnalysis` 用 `menuKeys.includes(pickRaw)`
+驗證（`classify/analysis.ts` 已實作），故 `selectTargets` 與 Stage 1 組 menu
+時**必須用同一個 `targetKey()` 編碼**（定義在 `route/select.ts` 並匯出，
+供 Stage 1 與測試複用）。menu 只在 `modelPick: "menu"` 且候選 > 1 時組成
+（`buildQuestions` 對 menu 長度 ≤ 1 不加第六題）。
+
+**tier 選項內的可用性回退**：整條鏈都不可用 → 用最近的可用層級
+（`selectTargets` 回空鏈時由呼叫端觸發，見 Stage 4 實作契約第 1 點）。
 
 ### Stage 4 — guard
 
@@ -532,6 +569,26 @@ mode 決定 Stage 5 動作：
 - 寫 transcript entry：`→` switched、`=` held、`•` notify、
   `×` skipped、`·` not routed。
 - entry **不進入 LLM context**（`excludeFromContext: true`）。
+
+> 2026-10-01 補（寫 `route/apply.ts` 前定）：原句沒說 `target.model` 怎麼變成
+> `pi.setModel` 的引數。**定案**：`setModel` 接收 `"<provider>/<model>"` 形狀，
+> `provider` 為空字串（`prefer` 注入）時**只傳裸 `model`**——用與 menu id
+> 同一個 `targetKey()`（`route/select.ts` 匯出），避免兩處編碼漂移。
+>
+> `readThinkingLevel()` 可選（pi 舊版可能沒有）：缺時 entry 的
+> `thinking.applied` 欄位留空（**不假裝成功**），`resolved` 仍照記。
+>
+> **`applyRoute` 永不 throw**（Part 2 fail-open）：`setModel`／`setThinkingLevel`
+> 拋錯 → 捕獲、entry 記 `reason: "apply failed: <sanitized>"`（過
+> `sanitizeRemote` 上限）、維持原模型繼續回合。
+>
+> **notify 模式的 `notify-only`**：不呼叫 `setModel`，但**照樣寫 entry**
+> （符號 `•`、`reason` 帶 `not applied (notify mode)`），且**不套 thinking**
+> （Part 5 mode 表：notify 下 applied 不動、held/skipped 才套 thinking——
+> `notify-only` 屬「applied 但不動作」那一列，故 thinking 也不套）。
+> `confirm` 的「詢問」由呼叫端（`index.ts`）負責：`applyRoute` 只回傳決策
+> 結果，**不阻塞等待使用者輸入**——詢問是 UI 層的事，`applyRoute` 是純資料
+> + hooks 套用。此為原規格缺口（confirm 誰問、何時問）的定案。
 
 ---
 
@@ -706,6 +763,50 @@ pressure = max(today÷dailyUsd, month÷monthlyUsd)
 `on/off`、`mode`、`budget` 為 session-only；
 持久化用 `/compass-set` 或 `compass_config`。
 
+#### 分數檔格式（2026-10-01 補，寫 `suggest.ts` 前定）
+
+原規格只寫「從本地分數檔提議路由」，**從未定義分數檔長什麼樣**——
+`suggest.ts` 骨架自己標了「實作前需補規格」。本節定案。
+
+`suggest.scoresFile` 指向一個 **JSON 檔**（非設定檔、非事實檔），形狀：
+
+```jsonc
+{
+  "generatedAt": "2026-10-01T12:00:00Z",   // ISO-8601，可選
+  "scores": {
+    // 鍵 = "<provider>/<model>"（或裸 model）；值 = 該模型的本地評分
+    "openrouter/openai/gpt-6-sol": {
+      "score": 0.92,          // 必需，0–1（越高越推薦）
+      "tier": "premium",      // 可選，建議放哪一層；缺省 = 依分數+價格帶推
+      "note": "long-context"  // 可選，提議理由（entry 顯示）
+    },
+    "~z-ai/glm-latest": { "score": 0.81 }
+  }
+}
+```
+
+**解析規則（`suggest()` 的行為契約）**：
+
+1. `suggest.scoresFile === ""` → 回 `[]`（不讀任何檔，**不當作錯誤**）。
+2. 檔不存在 / 非 JSON / 缺 `scores` → **throw `Error`**（與 `loadConfig`
+   的 fail-open 不同：`suggest` 是使用者**主動下指令**要結果，靜默回空
+   會誤導成「沒有建議」；由 `index.ts` 捕獲並在 UI 顯示錯誤訊息）。
+3. 每筆 `score` 非有限數或不在 0–1 → **跳過該筆並在 `reason` 記
+   `invalid score`**，不整檔失敗（單筆髒資料不該讓整份建議消失）。
+4. `tier` 缺省時：依該模型在 `model-facts` 的 `capability` 與當前
+   `profile` 的價格帶推——`factFor(provider, model)` 有事實就用
+   `sliceBands` 的歸帶，無事實（unrated）時**跳過該筆**並記
+   `unrated model`（與 `allowUnratedPicks: false` 的 menu gate 同理由）。
+5. `tier` 給了但不合法（非 `Tier`）→ 跳過該筆記 `unknown tier`。
+6. 產出的 `Suggestion.tier` 是**提議**，`reason` 格式：
+   `"score 0.92 · <note>"`（note 缺省只留分數）。`target` 標
+   `explicit: false`（提議不是設定，不該繞過 L2 過濾）。
+7. 回傳**依 `score` 降序**（最推薦在前），同分依 `model` 字典序穩定排序。
+8. **純提議**：不寫 config、不切換（Part 10.1 表已明言「不切換」）。
+
+`suggest.test.ts` 依此覆寫：空路徑回空、壞檔 throw、單筆髒資料跳過、
+缺 tier 的事實推導、非法 tier 跳過、排序、explicit=false。
+
 ### 10.2 `/compass-set` 選單
 
 沿用你 `settings-ui.ts` 的結構（原創檔），項目改名：
@@ -827,8 +928,10 @@ pi-compass/
 | `pipeline.test.ts` | **新增** | Stage 1–5 各自的純函式 |
 | `analysis.test.ts` | **新增**（2026-10-01 補） | 問題集建構、laya 回應解析、score→0–3 正規化、非法種類拒絕、`sanitizeRemote` 上限 |
 | `cache.test.ts` | **新增** | 快取命中／TTL／LRU／config 失效 |
-| `suggest.test.ts` | **新增** | 分數檔 → 路由提議 |
+| `suggest.test.ts` | **新增** | 分數檔 → 路由提議（格式見 Part 10.1 分數檔格式節） |
 | `budget.test.ts` | **新增** | soft/hard 壓力、demand ≥2.5 例外 |
+| `select.test.ts` | **新增**（2026-10-01 補） | Stage 3 順序、minTier 過濾、specialistPriority 排序、freeOnly/freePool 兩池獨立、menu 六道閘、`targetKey` 編碼 |
+| `apply.test.ts` | **新增**（2026-10-01 補） | Stage 5 各 mode 動作、notify 不套 thinking、apply 永不 throw、entry 符號 |
 
 `npm test` 改用 **`node:test`（內建，零新相依）**；斷言沿用
 `node:assert/strict`，刪除各測試檔手寫的 `test()` 與 pass/fail 計數 helper

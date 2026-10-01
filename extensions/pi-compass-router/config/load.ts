@@ -4,7 +4,7 @@ import { homedir } from "node:os";
 import { join } from "node:path";
 import { COMPASS_ENV_MAP, parseEnvOverrides, type EnvPatch } from "./env.js";
 import { MODEL_FACTS, factsValid, rankedFacts, sliceBands } from "../policy/facts.js";
-import { filterChain, insertPrefer } from "../policy/filter.js";
+import { ceilingFor, filterChain, insertPrefer } from "../policy/filter.js";
 import {
   DEFAULT_CONFIG,
   PROFILE_CEILINGS,
@@ -454,13 +454,6 @@ function emptyChains(): CompassConfig {
     routes: { quick: [], standard: [], high: [], premium: [], xpremium: [] },
     kindModels: {},
   };
-}
-
-/** 有效天花板：顯式 `ceilings` 覆寫優先，否則用 profile 表（Part 9 L2）。 */
-function ceilingFor(config: CompassConfig, tier: (typeof TIERS)[number]): number | null {
-  const own = config.ceilings[tier];
-  if (own !== undefined) return own;
-  return PROFILE_CEILINGS[config.profile][tier] ?? null;
 }
 
 /**
