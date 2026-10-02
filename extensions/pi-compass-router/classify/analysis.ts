@@ -39,7 +39,9 @@ export interface QuestionSpec {
   instructions: string;
   /** choice 用：選項標籤（list）或標籤→說明（dict）。 */
   criteria?: string[] | Record<string, string>;
-  /** score 用：由低到高的 rubric 層級。 */
+  /** score 的 rubric 層級（由低到高）。**送入 laya 時用 `criteria` 鍵**——
+   *  laya-mlx 的 `_to_internal` 對 score 只認 `criteria`（非空 list），
+   *  `legend` 是它**回傳**答案時用的鍵（`parseAnalysis` 讀回 `answer.legend`）。 */
   legend?: string[];
 }
 
@@ -122,12 +124,12 @@ export function buildQuestions(kinds: readonly TaskKind[], menu?: readonly strin
     [Q.complexity]: {
       type: "score",
       instructions: COMPLEXITY_INSTRUCTIONS,
-      legend: [...COMPLEXITY_RUBRIC],
+      criteria: [...COMPLEXITY_RUBRIC],
     },
     [Q.capability]: {
       type: "score",
       instructions: CAPABILITY_INSTRUCTIONS,
-      legend: [...CAPABILITY_RUBRIC],
+      criteria: [...CAPABILITY_RUBRIC],
     },
     [Q.deepReasoning]: {
       type: "noul",

@@ -351,6 +351,61 @@ Judgment     { kind, kindConfidence, complexity, capability,
   期間 fail-open。
 - **不計費**：laya 分類的 token 不進預算帳本（本機推論無雲端成本）。
 
+#### 橋接契約（2026-10-01 補，寫 `laya.ts` / `laya-server.py` 前定）
+
+原規格只有 `{ id, kind, ... }` → `{ id, analysis }` 的粗略輪廓，**沒定義
+雙方交換的精確欄位**。以下為定案（依 laya-mlx 官方公開 API——
+`Agent(state, questions)` → `{model, answers, usage}`，已讀其源碼驗證）：
+
+**入站（TS → Python，一行一 JSON）**：
+
+```jsonc
+{ "id": "<string>",           // 關聯請求/回應，同 id
+  "state": "<string>",         // 對話/請求文字（Part 4.4：僅 request + conversation）
+  "questions": { ... }         // buildQuestions() 產出的 Questions（
+}                               //   questionId -> {type, instructions, criteria/legend}
+```
+
+**出站（Python → TS，一行一 JSON）**：
+
+```jsonc
+{ "id": "<string>",
+  "analysis": { "model": "laya-rl-agent", "answers": { ... }, "usage": {...} }
+  //         ↑ 直接是 Agent.system_one() 的原樣回傳，由 parseAnalysis() 解
+}
+{ "id": "<string>", "error": "<string>" }   // 載入/推論失敗
+{ "ready": true }                            // 模型載入完成（預熱訊號，無 id）
+```
+
+**Python 端契約**：
+- `laya-server.py` 收 stdin 每行 JSON，回 stdout 每行 JSON；**不開網路**。
+- 啟動即載入 `Agent(<classify.model>, dtype="float16")`，載入完成印 `{"ready":true}`。
+- 每請求呼叫 `agent.system_one(state, questions)`，**把 MLX/np 陣列轉成純
+  Python 標量再 `json.dumps`**（`answers` 內的值已是 round 過的 float/int/str，
+  直接可序列化；`usage` 同理）。
+- 例外 → 回 `{"id":…, "error": str(e)}`（截斷），不 crash。
+- `questions` 欄位直接透傳給 `system_one`（其 `prepare()` 會 `_to_internal`）。
+
+**TS 端契約（`classify/laya.ts`）**：
+- `createLayaClassifier(config)` 回 `Classifier`：
+  - `classify()`：快取查 → 命中即回；否則 spawn（或重用）子行程、送一筆、
+    收 `{id, analysis}` → `parseAnalysis(analysis, latencyMs, {source:"laya",
+    allowedKinds, menuKeys})` → 快取存 → 回 Judgment。
+  - `warm()`：起子行程並等 `{"ready":true}`（不計入首輪延遲）。
+  - `dispose()`：殺子行程、清 pending（不 throw）。
+  - **崩潰重啟**：子行程 exit → 標記需要重啟，下次呼叫重生；**連續失敗
+    3 次**才置 `unavailable=true`（狀態列用），期間 `classify()` 直接
+    throw `ClassifyError`（上層 fail-open），**不重试**（6.3 fail-open 快路徑）。
+  - **超時**：每請求受 `classify.timeoutMs` 約束（`signal` abort 或計時器），
+    逾時 → throw，不掛起。
+  - **不計費**：laya 回應的 `usage` 不送入 `recordSpend`（呼叫端不传）。
+- 子行程 `spawn(classify.python, [serverPath])`，`stdio` 為 pipe；
+  **unref** 掛著不阻擋程序退出（Part 4.2）。
+
+**測試（`test/laya.test.ts`，Part 12）**：用**假 python 腳本**（回固定 JSON）
+驗證規約、崩潰重啟、fail-open、超時——不依賴真模型（真 p95 由
+`test/latency.ts` 另驗）。
+
 ### 4.3 cloud 後端（可選，opt-in）
 
 - 要 `TYPESAFE_API_KEY`；金鑰來源順序：環境變數 →
