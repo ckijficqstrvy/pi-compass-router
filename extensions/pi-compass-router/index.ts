@@ -3,7 +3,6 @@
 // 接線契約見 SPEC Part 11「index.ts 接線契約」節（2026-10-01 定）。
 // 整個路由鉤子 fail-open（Part 2）：任何异常都不擋住使用者的回合。
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
-import { Text } from "@earendil-works/pi-tui";
 import { Type } from "typebox";
 
 import { loadConfig, validatePatch, writeConfigPatch } from "./config/load.js";
@@ -16,7 +15,8 @@ import { createLayaClassifier } from "./classify/laya.js";
 import { createCloudClassifier } from "./classify/cloud.js";
 import { reloadClassifier } from "./classify/lifecycle.js";
 import type { Classifier, Judgment } from "./classify/types.js";
-import { renderEntry, type RouteEntry } from "./ui/entries.js";
+import { type RouteEntry } from "./ui/entries.js";
+import { renderEntryCard } from "./ui/entry-card.js";
 import { suggest } from "./suggest.js";
 import { runSettingsWizard, type CandidateKind, type WizardHooks } from "./ui/wizard.js";
 import { cloudClassifierKeys, localCheckpoints, openRouterModelKeys } from "./ui/sources.js";
@@ -241,10 +241,11 @@ export default function compass(pi: ExtensionAPI): void {
     await routeTurn(pi, ctx, state, event.prompt);
   });
 
-  // transcript entry 渲染（Part 10.4）：renderEntry 給字串，包成 TUI Text。
-  pi.registerEntryRenderer<RouteEntry>("compass", (entry) => {
+  // transcript entry 渲染（Part 10.4）：主題化卡片（ui/entry-card.ts）。
+  // 收合一列脈絡、展開樹狀明細；內容來自 entries.ts 的 buildEntryView。
+  pi.registerEntryRenderer<RouteEntry>("compass", (entry, options, theme) => {
     const data = entry.data ?? { symbol: "·" as const, tier: null, target: null };
-    return new Text(renderEntry(data), 0, 0);
+    return renderEntryCard(data, options, theme);
   });
 
   registerCommands(pi, state);

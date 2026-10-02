@@ -89,7 +89,7 @@ test("profileLabel and profileFromLabel round-trip, ceilings printed in the labe
 // renderEntry（Part 10.4）
 // ---------------------------------------------------------------------------
 
-test("renderEntry formats the head and detail lines per Part 10.4", () => {
+test("renderEntry formats the head and detail rows per Part 10.4", () => {
   const text = renderEntry({
     symbol: "→",
     tier: "standard",
@@ -104,13 +104,38 @@ test("renderEntry formats the head and detail lines per Part 10.4", () => {
     thinking: { resolved: "high" },
   });
   const lines = text.split("\n");
-  assert.equal(lines[0], "compass → standard openrouter/xiaomi/mimo-v2.6-pro");
-  assert.match(lines[1], /plan 90%/);
-  assert.match(lines[1], /complexity 1\.70\/3/);
-  assert.match(lines[1], /capability 1\.55\/3/);
-  assert.match(lines[1], /reasoning 0\.82/);
-  assert.match(lines[2], /budget 74% of cap/);
-  assert.match(lines[2], /classify laya 12ms \(miss\)/);
+  assert.equal(lines[0], "compass → standard  openrouter/xiaomi/mimo-v2.6-pro");
+  assert.match(lines[1], /^├ task\s+plan 90%/);
+  assert.match(lines[2], /^├ scoring\s+complexity 1\.70\/3/);
+  assert.match(lines[2], /capability 1\.55\/3/);
+  assert.match(lines[2], /reasoning 0\.82/);
+  assert.match(lines[3], /^├ thinking\s+→ high$/);
+  assert.match(lines[4], /^├ budget\s+74% of cap/);
+  assert.match(lines[5], /^└ classify\s+laya 12ms \(miss\)/);
+});
+
+test("renderEntry collapsed view is one summary line with the pulse", () => {
+  const text = renderEntry(
+    {
+      symbol: "→",
+      tier: "standard",
+      target: { provider: "openrouter", model: "xiaomi/mimo-v2.6-pro" },
+      kind: "plan",
+      kindConfidence: 0.9,
+      demand: 1.63,
+      budgetPressure: 0.74,
+      classify: { source: "laya", latencyMs: 73, hit: false },
+      thinking: { resolved: "off" },
+    },
+    { expanded: false },
+  );
+  const lines = text.split("\n");
+  assert.equal(lines.length, 2, "head + one summary line");
+  assert.match(lines[1], /^plan 90%/);
+  assert.match(lines[1], /demand 1\.63/);
+  assert.match(lines[1], /thinking → off/);
+  assert.match(lines[1], /laya 73ms \(miss\)/);
+  assert.ok(!text.includes("├") && !text.includes("└"), "collapsed has no tree rails");
 });
 
 test("renderEntry omits absent segments instead of leaving stray separators", () => {
@@ -118,8 +143,8 @@ test("renderEntry omits absent segments instead of leaving stray separators", ()
   const lines = text.split("\n");
   assert.equal(lines[0], "compass ×");
   assert.equal(lines.length, 2, "only head + reason, no empty detail lines");
-  assert.equal(lines[1], "continuation");
-  assert.ok(!text.includes("··"), "no doubled separators");
+  assert.match(lines[1], /^└ reason\s+continuation$/);
+  assert.ok(!text.includes("· ·"), "no doubled separators");
 });
 
 test("renderEntry shows applied-after-clamp when the readback differs", () => {
@@ -139,7 +164,7 @@ test("renderEntry lists menu-gate rejection notes", () => {
     target: { provider: "p", model: "m" },
     notes: ["price over ceiling", "unrated model"],
   });
-  assert.match(text, /price over ceiling \/ unrated model/);
+  assert.match(text, /price over ceiling · unrated model/);
 });
 
 // ---------------------------------------------------------------------------

@@ -1092,11 +1092,34 @@ export function writeConfigPatch(patch: Record<string, unknown>, filePath = CONF
 
 ### 10.4 transcript entry
 
+收合（預設）：徽章 + 符號 + 層級 + 目標模型一行，脈絡一列帶過：
+
 ```
-compass → standard  openrouter/xiaomi/mimo-v2.6-pro
-plan · complexity 1.70/3 · capability 1.55/3 · reasoning 0.82 → high (used standard)
-· budget 74% of cap → one tier down · classify laya 12ms (miss)
+ compass → standard  openrouter/xiaomi/mimo-v2.6-pro
+ plan 90% · demand 1.63 · thinking → high · laya 12ms (miss)
 ```
+
+展開（`app.tools.expand`）：樹狀明細列取代脈絡列（不重複）：
+
+```
+ compass → standard  openrouter/xiaomi/mimo-v2.6-pro
+ ├ task       plan 90%
+ ├ scoring    complexity 1.70/3 · capability 1.55/3 · reasoning 0.82 · demand 1.63
+ ├ thinking   → high
+ ├ budget     74% of cap
+ └ classify   laya 12ms (miss) · cache miss ≈ $0.002
+```
+
+視覺規格（TUI 卡片 `ui/entry-card.ts`，2026-10-02 定）：
+
+- 卡片底 `customMessageBg`，首行 `compass` 徽章用 accent 底反白，
+  把路由決策從 transcript 流中凸顯出來。
+- 符號語意色：`→` success、`=` muted、`•` accent、`×` warning、`·` dim。
+- 層級色階（quick → xpremium）：success → text → accent → warning → error。
+- thinking 値用 theme 的 `thinking<Level>` 色票（與 thinking 面板一致）；
+  數值 `syntaxNumber`、標籤 `customMessageLabel`、樹狀導軌 `borderMuted`。
+- 內容唯一來源是 `entries.ts` 的 `buildEntryView`（純函式）；卡片只做
+  Tone → theme token 映射。收合行尾附 expand 提示（`keyHint`）。
 
 展開顯示：kind 與信心、complexity、capability、deep-reasoning、
 composed demand、budget pressure、
@@ -1143,7 +1166,8 @@ pi-compass/
 │   ├── suggest.ts            # /compass suggest（本地分數檔）
 │   └── ui/
 │       ├── wizard.ts         # /compass-set（沿用你的原創）
-│       └── entries.ts        # transcript entry 渲染
+│       └── entries.ts        # entry 檢視模型 + 純文字渲染
+│       └── entry-card.ts     # entry 主題化卡片（Tone → theme token）
 ├── test/
 ├── scripts/refresh-facts.mjs # 沿用你的原創
 ├── NOTICE
@@ -1167,7 +1191,7 @@ pi-compass/
 | `pi.setModel(model: Model)` 收**物件**不是字串，回 `Promise<boolean>` | Stage 5 的 `setModel("provider/model")` 要先經 `ctx.modelRegistry.find(provider, modelId)` 解析成 `Model`；回 `false` = 認證未配 → 当作 fail-open（不切、entry 記原因）。 |
 | `ctx.model` 是當前 `Model`、`ctx.modelRegistry.find()` / `.getAvailable()` | stickiness 比對與「可用性回退」都拿這裡；`find` 回 `undefined` = 不可用。 |
 | `pi.setThinkingLevel(level)` 同步、`pi.getThinkingLevel()` 讀回 | Stage 5 read-back 直接接。pi 的 `ThinkingLevel` = `off\|minimal\|low\|medium\|high\|xhigh\|max`，**與 compass 完全一致**，無需轉換。 |
-| `pi.appendEntry(customType, data)` + `pi.registerEntryRenderer` | Stage 5 的 transcript entry 走這裡（`customType: "compass"`，**不进 LLM context**）。渲染用 `renderEntry()`。 |
+| `pi.appendEntry(customType, data)` + `pi.registerEntryRenderer` | Stage 5 的 transcript entry 走這裡（`customType: "compass"`，**不进 LLM context**）。渲染用 `renderEntryCard()`（`ui/entry-card.ts`，主題化卡片）；純文字 `renderEntry()` 供測試/非 TUI 端。 |
 | `pi.on("before_agent_start", …)` 拿 `event.prompt` | **路由鉤子**：每轮 agent 前跑 Stage 1–5。`turn_start` 只有 `turnIndex` 没 prompt，故用 `before_agent_start`。 |
 | `pi.registerCommand(name, {handler: (args, ctx)})` | `/compass*` 9 個命令（Part 10.1）。`ctx.ui.notify` 顯示、`ctx.ui.confirm` 問 confirm 模式。 |
 | `pi.registerTool({name, parameters(TypeBox), execute})` | `compass_route` / `compass_config`（Part 1）。execute 回 `{content:[{type:"text",text}], details}`。 |
@@ -1196,7 +1220,7 @@ pi-compass/
    （Part 10.1 以 `compass` 前綴註冊，子命令在 handler 解析 args。）
 5. **工具**：`compass_route`（分类任意文字回建议）、`compass_config`
    （`validatePatch`/`writeConfigPatch`）。
-6. **entry 渲染**：`registerEntryRenderer("compass", …)` 用 `renderEntry()`。
+6. **entry 渲染**：`registerEntryRenderer("compass", …)` 用 `renderEntryCard()`（收合/展開都吃 `buildEntryView`）。
 
 **不做**：`cloud.ts` 仍阻塞（Part 4.3），`classify.provider: "cloud"` 时
 鉤子 fail-open 并在 status 明说不可用（不 spawn cloud）。
