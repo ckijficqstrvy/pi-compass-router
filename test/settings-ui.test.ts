@@ -19,7 +19,7 @@ import {
 } from "../extensions/pi-compass-router/ui/wizard.js";
 import { renderEntry } from "../extensions/pi-compass-router/ui/entries.js";
 import { writeConfigPatch } from "../extensions/pi-compass-router/config/load.js";
-import { DEFAULT_CONFIG } from "../extensions/pi-compass-router/schema.js";
+import { DEFAULT_CONFIG, DISPLAY_DEFAULTS } from "../extensions/pi-compass-router/schema.js";
 import type { CompassConfig, Mode, Profile } from "../extensions/pi-compass-router/schema.js";
 
 // ---------------------------------------------------------------------------
@@ -165,6 +165,77 @@ test("renderEntry lists menu-gate rejection notes", () => {
     notes: ["price over ceiling", "unrated model"],
   });
   assert.match(text, /price over ceiling · unrated model/);
+});
+
+test("renderEntry honors display.fields order and subset in the summary", () => {
+  const text = renderEntry(
+    {
+      symbol: "→",
+      tier: "standard",
+      target: { provider: "p", model: "m" },
+      kind: "plan",
+      kindConfidence: 0.9,
+      demand: 1.63,
+      thinking: { resolved: "high" },
+      classify: { source: "laya", latencyMs: 12, hit: false },
+    },
+    { expanded: false, display: { ...DISPLAY_DEFAULTS, fields: ["classify", "kind"] } },
+  );
+  const lines = text.split("\n");
+  assert.equal(lines.length, 2, "head + summary");
+  assert.equal(lines[1], "laya 12ms (miss) · plan 90%", "field order follows display.fields");
+});
+
+test("renderEntry compact detail drops the summary line entirely", () => {
+  const text = renderEntry(
+    {
+      symbol: "→",
+      tier: "standard",
+      target: { provider: "p", model: "m" },
+      kind: "plan",
+      demand: 1.63,
+    },
+    { expanded: false, display: { ...DISPLAY_DEFAULTS, detail: "compact" } },
+  );
+  assert.equal(text.split("\n").length, 1, "only the head line");
+});
+
+test("renderEntry full detail shows tree rows even when collapsed", () => {
+  const text = renderEntry(
+    {
+      symbol: "→",
+      tier: "standard",
+      target: { provider: "p", model: "m" },
+      kind: "plan",
+      classify: { source: "laya", latencyMs: 12, hit: true },
+    },
+    { expanded: false, display: { ...DISPLAY_DEFAULTS, detail: "full" } },
+  );
+  assert.match(text, /├ task/);
+  assert.match(text, /└ classify/);
+});
+
+test("renderEntry drops the tree rails when display.rails is off", () => {
+  const text = renderEntry(
+    {
+      symbol: "→",
+      tier: "standard",
+      target: { provider: "p", model: "m" },
+      kind: "plan",
+    },
+    { display: { ...DISPLAY_DEFAULTS, rails: false } },
+  );
+  assert.ok(!text.includes("├") && !text.includes("└"), "no rails");
+  assert.match(text, /^task\s+plan/m);
+});
+
+test("writeConfigPatch merges display subkeys instead of replacing the block", () => {
+  const path = freshConfigFile({ mode: "notify", display: { detail: "compact", hint: false } });
+  const problem = writeConfigPatch({ display: { detail: "full" } }, path);
+  assert.equal(problem, null);
+  const file = JSON.parse(readFileSync(path, "utf8"));
+  assert.equal(file.display.detail, "full", "patched subkey written");
+  assert.equal(file.display.hint, false, "untouched subkey survives the merge");
 });
 
 // ---------------------------------------------------------------------------

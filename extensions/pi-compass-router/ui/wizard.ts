@@ -15,9 +15,12 @@
 // 候選來源（registry、本機 HF 快取等 I/O）在接線層，經 `hooks.candidates`
 // 注入；未實作或回空 → 該項仍以內建預設為種子（不打字）。
 import { MODEL_FACTS, factsValid } from "../policy/facts.js";
-import { DEFAULT_CONFIG, PROFILE_CEILINGS, TIERS } from "../schema.js";
+import { DEFAULT_CONFIG, DISPLAY_DETAILS, DISPLAY_FIELDS, PROFILE_CEILINGS, TIERS } from "../schema.js";
 import type {
   CompassConfig,
+  DisplayColor,
+  DisplayDetail,
+  DisplayField,
   Mode,
   Profile,
   Target,
@@ -262,7 +265,7 @@ const CLASSIFY_NUM_PRESETS: Readonly<Record<string, readonly number[]>> = {
 // 選單結構：六組 → 各組項目
 // ---------------------------------------------------------------------------
 
-type Group = "routing" | "budget" | "models" | "classifier" | "policy" | "diagnostics";
+type Group = "routing" | "budget" | "models" | "classifier" | "policy" | "display" | "diagnostics";
 
 const GROUPS: ReadonlyArray<{ id: Group; name: string }> = [
   { id: "routing", name: "① 路由行為" },
@@ -270,7 +273,8 @@ const GROUPS: ReadonlyArray<{ id: Group; name: string }> = [
   { id: "models", name: "③ 模型與層級" },
   { id: "classifier", name: "④ 分類器" },
   { id: "policy", name: "⑤ 政策與過濾" },
-  { id: "diagnostics", name: "⑥ 重設・診斷" },
+  { id: "display", name: "⑥ 顯示與呈現" },
+  { id: "diagnostics", name: "⑦ 重設・診斷" },
 ];
 
 type MenuItem =
@@ -298,6 +302,12 @@ type MenuItem =
   | "classifyNums"
   | "filters"
   | "ceilings"
+  | "detail"
+  | "fields"
+  | "badge"
+  | "color"
+  | "hint"
+  | "rails"
   | "reset"
   | "testClassifier"
   | "chainSource";
@@ -308,6 +318,7 @@ const GROUP_ITEMS: Readonly<Record<Group, readonly MenuItem[]>> = {
   models: ["chains", "kindModels", "prefer", "kindTiers", "xpremium", "useDefaultModels"],
   classifier: ["provider", "checkpoint", "classifyCache", "classifyNums"],
   policy: ["filters", "ceilings"],
+  display: ["detail", "fields", "badge", "color", "hint", "rails"],
   diagnostics: ["reset", "testClassifier", "chainSource"],
 };
 
@@ -337,6 +348,12 @@ const ITEM_NAMES: Readonly<Record<MenuItem, string>> = {
   classifyNums: "分類參數",
   filters: "過濾規則",
   ceilings: "價格天花板",
+  detail: "呈現密度",
+  fields: "收合列欄位",
+  badge: "compass 徽章",
+  color: "配色",
+  hint: "expand 提示",
+  rails: "樹狀導軌",
   reset: "重設某項回預設",
   testClassifier: "測試分類器",
   chainSource: "看鏈的來源",
@@ -348,6 +365,13 @@ const DONE_OPTION = "結束";
 
 const money = (n: number | null): string => (n === null ? "無上限" : `$${n.toFixed(2)}`);
 const onOff = (value: boolean): string => (value ? "開" : "關");
+
+/** 呈現密度 → 白話說明（項目列顯示用）。 */
+const DETAIL_HINT: Record<DisplayDetail, string> = {
+  compact: "只看決策首行",
+  standard: "脈絡一列（預設）",
+  full: "直接攤開明細",
+};
 
 /** 去重（保序）：候選清單合併用。 */
 function dedupe(values: readonly string[]): string[] {
@@ -567,8 +591,12 @@ function renderGroupRow(group: Group, config: CompassConfig): string {
       const ceilingsCount = Object.keys(config.ceilings).length;
       return `⑤ 政策與過濾 .......... deny ${config.deny.length} · ceilings ${ceilingsCount === 0 ? "依 profile" : `${ceilingsCount} 自訂`} · prefer ${preferCount}`;
     }
+    case "display": {
+      const d = config.display;
+      return `⑥ 顯示與呈現 ........... ${d.detail} · 欄位 ${d.fields.length} · ${d.color}${d.badge ? " · 徽章" : ""}`;
+    }
     case "diagnostics":
-      return `⑥ 重設・診斷 .......... 重設某項 · 測試分類器 · 看鏈的來源`;
+      return `⑦ 重設・診斷 .......... 重設某項 · 測試分類器 · 看鏈的來源`;
   }
 }
 
@@ -638,6 +666,21 @@ function renderItemRow(item: MenuItem, config: CompassConfig): string {
       const count = Object.keys(config.ceilings).length;
       return `${name}${pad}${count === 0 ? "依 profile 價格帶" : `${count} 層自訂`}`;
     }
+    case "detail":
+      return `${name}${pad}${config.display.detail}（${DETAIL_HINT[config.display.detail]}）`;
+    case "fields": {
+      const shown = config.display.fields;
+      const chips = DISPLAY_FIELDS.map((f) => (shown.includes(f) ? f : `-${f}`)).join(" ");
+      return `${name}${pad}${chips}（- = 不顯示）`;
+    }
+    case "badge":
+      return `${name}${pad}${onOff(config.display.badge)}`;
+    case "color":
+      return `${name}${pad}${config.display.color === "mono" ? "mono（單色，只留明暗）" : "rich（全彩）"}`;
+    case "hint":
+      return `${name}${pad}${onOff(config.display.hint)}`;
+    case "rails":
+      return `${name}${pad}${onOff(config.display.rails)}`;
     case "reset":
       return `${name}${pad}…`;
     case "testClassifier":
@@ -736,6 +779,15 @@ function classifyEdit(value: Partial<CompassConfig["classify"]>): EditResult {
     key: "classify",
     value,
     applyTo: (live) => ({ classify: { ...live.classify, ...value } }),
+  };
+}
+
+/** `display` 區塊的編輯結果（同上；OBJECT_MERGE_KEYS 逐子鍵合併）。 */
+function displayEdit(value: Partial<CompassConfig["display"]>): EditResult {
+  return {
+    key: "display",
+    value,
+    applyTo: (live) => ({ display: { ...live.display, ...value } }),
   };
 }
 
@@ -1345,7 +1397,63 @@ async function editItem(
       };
     }
 
-    // ------------------------------------------------------------ ⑥ 診斷
+    // ------------------------------------------------------------ ⑥ 顯示
+    case "detail": {
+      const labels = (DISPLAY_DETAILS as readonly DisplayDetail[]).map((d) => `${d} — ${DETAIL_HINT[d]}`);
+      const picked = await pickFrom(hooks, `呈現密度（目前：${config.display.detail}）`, labels);
+      if (picked === undefined || picked === null) return picked;
+      return displayEdit({ detail: picked.split(" — ")[0] as DisplayDetail });
+    }
+
+    case "fields": {
+      // toggle 迴圈：選一項切換顯示/隱藏；「← 完成」才一次性落檔（沒動就取消）。
+      let fields = [...config.display.fields];
+      for (;;) {
+        const rows = DISPLAY_FIELDS.map((f) => `${fields.includes(f) ? "✓" : "✗"} ${f}`);
+        const pickedRow = await pickFrom(hooks, "收合列欄位：選一項切換（✓ = 顯示）", [
+          ...rows,
+          "← 完成（套用）",
+        ]);
+        if (pickedRow === undefined || pickedRow === null) return pickedRow;
+        if (pickedRow.startsWith("←")) break;
+        const field = pickedRow.slice(2) as DisplayField;
+        // 加回時依 DISPLAY_FIELDS 固定順序插入（wizard 不產生自訂順序）。
+        fields = fields.includes(field)
+          ? fields.filter((f) => f !== field)
+          : DISPLAY_FIELDS.filter((f) => f === field || fields.includes(f));
+      }
+      if (fields.join("\u0000") === config.display.fields.join("\u0000")) return undefined;
+      return displayEdit({ fields });
+    }
+
+    case "badge": {
+      const picked = await pickFrom(hooks, "compass 徽章", ["開", "關"]);
+      if (picked === undefined || picked === null) return picked;
+      return displayEdit({ badge: picked === "開" });
+    }
+
+    case "color": {
+      const picked = await pickFrom(hooks, "配色", [
+        "rich — 全彩（跟隨主題）",
+        "mono — 單色（只留明暗，適合截圖／淺色主題）",
+      ]);
+      if (picked === undefined || picked === null) return picked;
+      return displayEdit({ color: (picked.startsWith("mono") ? "mono" : "rich") as DisplayColor });
+    }
+
+    case "hint": {
+      const picked = await pickFrom(hooks, "expand 提示（收合行尾）", ["開", "關"]);
+      if (picked === undefined || picked === null) return picked;
+      return displayEdit({ hint: picked === "開" });
+    }
+
+    case "rails": {
+      const picked = await pickFrom(hooks, "樹狀導軌（├/└）", ["開", "關"]);
+      if (picked === undefined || picked === null) return picked;
+      return displayEdit({ rails: picked === "開" });
+    }
+
+    // ------------------------------------------------------------ ⑦ 診斷
     case "reset": {
       const targets: ReadonlyArray<{ key: string; label: string }> = [
         { key: "enabled", label: `enabled — ${onOff(config.enabled)}` },
@@ -1365,6 +1473,7 @@ async function editItem(
         { key: "useDefaultModels", label: `useDefaultModels — ${onOff(config.useDefaultModels)}` },
         { key: "xpremium", label: `xpremium — ${onOff(config.xpremium.enabled)}` },
         { key: "thinking", label: `thinking — pin ${config.thinking.pin ?? "（無）"}` },
+        { key: "display", label: `display — ${config.display.detail} · ${config.display.color}` },
         { key: "prefer", label: `prefer — ${Object.keys(config.prefer).length} 層` },
         { key: "ceilings", label: `ceilings — ${Object.keys(config.ceilings).length} 層自訂` },
         { key: "routes", label: `routes — 全部五層回自動派生` },

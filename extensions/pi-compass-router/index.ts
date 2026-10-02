@@ -242,10 +242,10 @@ export default function compass(pi: ExtensionAPI): void {
   });
 
   // transcript entry 渲染（Part 10.4）：主題化卡片（ui/entry-card.ts）。
-  // 收合一列脈絡、展開樹狀明細；內容來自 entries.ts 的 buildEntryView。
+  // 收合一列脈絡、展開樹狀明細；內容來自 entries.ts（吃 display 設定）。
   pi.registerEntryRenderer<RouteEntry>("compass", (entry, options, theme) => {
     const data = entry.data ?? { symbol: "·" as const, tier: null, target: null };
-    return renderEntryCard(data, options, theme);
+    return renderEntryCard(data, { expanded: options.expanded, display: state.config.display }, theme);
   });
 
   registerCommands(pi, state);

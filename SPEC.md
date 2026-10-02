@@ -216,6 +216,12 @@ pi-compass 是一個 pi 擴充，在每一輪對話**開始之前**判斷該用�
 | `cache.cooldownSeconds` | integer ≥0 | `0` | 切換後冷卻秒數，0=關 |
 | `thinking.pin` | `off…max` | 無 | 全域 pin |
 | `thinking.<kind>` | `off…max` | 無 | 按任務種類 pin |
+| `display.detail` | `compact｜standard｜full` | `standard` | 收合顯示量：只看決策首行／脈絡一列／直接攤開明細 |
+| `display.fields` | `DisplayField[]` | 全七項 | 收合列欄位與順序（`kind｜demand｜thinking｜classify｜budget｜reason｜notes`）；展開明細不受影響 |
+| `display.badge` | boolean | `true` | ` compass ` accent 徽章 |
+| `display.color` | `rich｜mono` | `rich` | 全彩／單色（只留明暗，適合截圖／淺色主題） |
+| `display.hint` | boolean | `true` | 收合行尾 expand 提示 |
+| `display.rails` | boolean | `true` | 樹狀導軌 `├`/`└` |
 
 `Target` = `{ provider, model, minTier?, thinkingLevel?, priority? }`
 
@@ -915,7 +921,8 @@ pressure = max(today÷dailyUsd, month÷monthlyUsd)
   ③ 模型與層級 .......... quick 3（自動2·你寫1） · 專家 10 種
   ④ 分類器 ............. laya · TTL 300s · timeout 800ms
   ⑤ 政策與過濾 .......... deny 3 · ceilings 依 profile · prefer 1
-  ⑥ 重設・診斷 .......... 重設某項 · 測試分類器 · 看鏈的來源
+  ⑥ 顯示與呈現 ........... standard · 欄位 7 · rich · 徽章
+  ⑦ 重設・診斷 .......... 重設某項 · 測試分類器 · 看鏈的來源
   結束
 
 （點 ③ 進組內選單——每列帶目前值與來源摘要）
@@ -964,7 +971,7 @@ interface WizardHooks {
   /** 回饋（2026-10-02 新增，可選）：寫入被拒、輸入無效、診斷結果。 */
   notify?(message: string, type?: "info" | "warning" | "error"): void;
   /** 測試分類器（2026-10-02 新增，可選）：跑一輪真分類，回一列結果；
-   *  未實作 → ⑥ 的「測試分類器」明說不支援。 */
+   *  未實作 → ⑦ 的「測試分類器」明說不支援。 */
   probeClassifier?(): Promise<string> | string;
 }
 ```
@@ -1010,7 +1017,7 @@ interface WizardHooks {
    （`config/load.ts`）——prefer／ceilings／thinking／模型鏈都能
    「改回自動／清除」，不再有單向門。
 3. **看得見誰決定**：組列與項目列帶**來源摘要**（`quick 3（自動2·你寫1）`），
-   ⑥ 有「看鏈的來源」逐條標「你寫的（鎖定）／自動派生」——呼應 L1 事實／
+   ⑦ 有「看鏈的來源」逐條標「你寫的（鎖定）／自動派生」——呼應 L1 事實／
    L2 政策／L3 显式分層。
 
 分組與開放範圍：
@@ -1022,7 +1029,8 @@ interface WizardHooks {
 | ③ 模型與層級 | `routes.<tier>`（設為首選…／放到末尾…／移除…／**改回自動（清除你寫的）**／自訂整條字串…；**只寫被改的那一層**）、`kindModels.<kind>`（**新增**，同款動作＋改回層級鏈）、`prefer.<tier>`（**新增**，含清除）、`kindMinimumTier`、`xpremium.enabled`、`useDefaultModels` |
 | ④ 分類器 | `classify.provider`（選項講清楚用哪個分類器，帶目前模型）、`classify.model`/`classify.cloud.*`（laya → HF 快取；cloud → **只放 `provider=typesafe`**；內建預設當種子）、`classify.cache/cacheTtlSeconds`、`classify.timeoutMs/confidenceThreshold/minPromptChars/historyTurns`（**新增**：預設檔位＋自訂） |
 | ⑤ 政策與過濾 | `deny`/`allowProviders`（`✓`/`✗` 切換＋新增 glob）、`ceilings.<tier>`（**新增**：依 profile／各帶檔位／自訂／**清除**） |
-| ⑥ 重設・診斷 | `重設某項回預設`（含 `routes`/`kindModels` 整組回自動）、**測試分類器**（跑一輪真分類不切換，`hooks.probeClassifier`）、**看鏈的來源**（逐條標來源＋事實檔日期） |
+| ⑥ 顯示與呈現 | `display.detail`（三檔帶白話說明）、`display.fields`（`✓`/`✗` 切換迴圈，「← 完成」一次性落檔；加回依固定順序）、`display.badge`、`display.color`（rich/mono）、`display.hint`、`display.rails` |
+| ⑦ 重設・診斷 | `重設某項回預設`（含 `routes`/`kindModels` 整組回自動、`display`）、**測試分類器**（跑一輪真分類不切換，`hooks.probeClassifier`）、**看鏈的來源**（逐條標來源＋事實檔日期） |
 
 **仍不暴露的設定（先分析再決定給不給）**：
 
@@ -1120,6 +1128,12 @@ export function writeConfigPatch(patch: Record<string, unknown>, filePath = CONF
   數值 `syntaxNumber`、標籤 `customMessageLabel`、樹狀導軌 `borderMuted`。
 - 內容唯一來源是 `entries.ts` 的 `buildEntryView`（純函式）；卡片只做
   Tone → theme token 映射。收合行尾附 expand 提示（`keyHint`）。
+
+以上可調（2026-10-02 補，Part 3.1 `display.*`、`/compass-set` ⑥ 顯示與呈現）：
+`detail` 三檔密度（compact 只看首行／standard 脈絡一列／full 直接攤開）、
+`fields` 收合列欄位與順序、`badge`/`color`（rich 全彩／mono 單色）、
+`hint`/`rails` 開關。佈局由 `composeLines(view, {expanded, display})` 統一決定，
+純文字與卡片共用；session 中途改 display，已寫入的 entry 要等 rebuild 才重畫。
 
 展開顯示：kind 與信心、complexity、capability、deep-reasoning、
 composed demand、budget pressure、

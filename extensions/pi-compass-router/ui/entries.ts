@@ -3,7 +3,14 @@
 // 本檔保持**純函式**（無 pi-tui / theme 依賴）：資料 → 色調段落（EntrySegment）
 // 的唯一來源。主題化卡片渲染在 `ui/entry-card.ts`，純文字 `renderEntry`
 // 供測試與非 TUI 端共用，兩者共用 `buildEntryView`，不會各自長歪。
-import type { Target, Tier, ThinkingLevel } from "../schema.js";
+import {
+  DISPLAY_DEFAULTS,
+  type DisplayConfig,
+  type DisplayField,
+  type Target,
+  type Tier,
+  type ThinkingLevel,
+} from "../schema.js";
 
 /** entry 符號（Part 5 Stage 5）：→ 切換、= 保持、• 通知、× 跳過、· 未路由。 */
 export type EntrySymbol = "→" | "=" | "•" | "×" | "·";
@@ -214,6 +221,17 @@ function reasonSegs(entry: RouteEntry): EntrySegment[] {
   return entry.reason === undefined ? [] : [seg(entry.reason, "muted")];
 }
 
+/** 收合列欄位 → 段落組（`display.fields` 的每個名字各有一組；缺欄位回空）。 */
+const SUMMARY_FIELDS: Record<DisplayField, (entry: RouteEntry) => EntrySegment[]> = {
+  kind: kindSegs,
+  demand: demandSegs,
+  thinking: (e) => (e.thinking !== undefined ? [seg("thinking ", "label"), ...thinkingSegs(e)] : []),
+  classify: classifySegs,
+  budget: (e) => (budgetSegs(e).length > 0 ? [seg("budget ", "label"), ...budgetSegs(e)] : []),
+  reason: reasonSegs,
+  notes: notesSegs,
+};
+
 // ---------------------------------------------------------------------------
 // buildEntryView：唯一內容來源
 // ---------------------------------------------------------------------------
@@ -228,7 +246,7 @@ function reasonSegs(entry: RouteEntry): EntrySegment[] {
  * - `rows`（展開時顯示）：task / scoring / thinking / budget / classify /
  *   picked / notes / reason 標籤列，取代 summary，不重複。
  */
-export function buildEntryView(entry: RouteEntry, expanded = true): EntryView {
+export function buildEntryView(entry: RouteEntry, display: DisplayConfig = DISPLAY_DEFAULTS): EntryView {
   // 首行。
   const head: EntrySegment[] = [seg("compass", "badge"), seg(" ", "dim"), seg(entry.symbol, SYMBOL_TONE[entry.symbol])];
   if (entry.tier !== null) head.push(seg(" ", "dim"), seg(entry.tier, TIER_TONE[entry.tier]));
@@ -238,16 +256,8 @@ export function buildEntryView(entry: RouteEntry, expanded = true): EntryView {
     head.push(seg(entry.target.model, "title"));
   }
 
-  // 收合脈絡列。
-  const summary = joinWith(" · ", [
-    kindSegs(entry),
-    demandSegs(entry),
-    entry.thinking !== undefined ? [seg("thinking ", "label"), ...thinkingSegs(entry)] : [],
-    classifySegs(entry),
-    budgetSegs(entry).length > 0 ? [seg("budget ", "label"), ...budgetSegs(entry)] : [],
-    reasonSegs(entry),
-    notesSegs(entry),
-  ]);
+  // 收合脈絡列：欄位與順序由 `display.fields` 決定。
+  const summary = joinWith(" · ", display.fields.map((field) => SUMMARY_FIELDS[field](entry)));
 
   // 展開明細列。
   const rows: EntryRow[] = [];
@@ -267,6 +277,47 @@ export function buildEntryView(entry: RouteEntry, expanded = true): EntryView {
 }
 
 // ---------------------------------------------------------------------------
+// 佈局：依 display 決定顯示哪些列
+// ---------------------------------------------------------------------------
+
+/** 一列輸出：導軌 + 標籤 + 內容（純文字與卡片共用）。 */
+export interface EntryLine {
+  /** `├ `/`└ ` 樹狀導軌（`display.rails: false` 時為空字串）。 */
+  rail: string;
+  /** 已補寬的列標籤（空字串 = 無標籤列）。 */
+  label: string;
+  segments: EntrySegment[];
+}
+
+/**
+ * 決定首行之下要顯示哪些列（Part 10.4、`display`）。
+ *
+ * - 展開（或 `detail: "full"`）：樹狀明細列；rows 為空時退回收合脈絡列。
+ * - 收合 `detail: "standard"`：脈絡一列。
+ * - 收合 `detail: "compact"`：只看決策首行（無列）。
+ */
+export function composeLines(
+  view: EntryView,
+  options: { expanded?: boolean; display?: DisplayConfig } = {},
+): EntryLine[] {
+  const display = options.display ?? DISPLAY_DEFAULTS;
+  const expanded = options.expanded ?? true;
+
+  if (expanded || display.detail === "full") {
+    const rows = view.rows.length > 0 ? view.rows : [{ label: "", segments: view.summary }];
+    return rows.map((row, i) => ({
+      rail: display.rails ? (i === rows.length - 1 ? "└ " : "├ ") : "",
+      label: row.label ? padRowLabel(row.label) : "",
+      segments: row.segments,
+    }));
+  }
+  if (display.detail === "standard" && view.summary.length > 0) {
+    return [{ rail: "", label: "", segments: view.summary }];
+  }
+  return [];
+}
+
+// ---------------------------------------------------------------------------
 // 純文字渲染（測試 / 非 TUI 端；無 ANSI）
 // ---------------------------------------------------------------------------
 
@@ -275,27 +326,17 @@ function plain(segments: EntrySegment[]): string {
 }
 
 /**
- * 純文字渲染（Part 10.4）。預設 `expanded: true`（完整明細）。
- *
- * 收合：`head` + `summary` 一列；展開：`head` + 樹狀 `rows`（`├`/`└`），
- * summary 由 rows 取代，不重複。資料缺欄位時整段省略，不留下孤立分隔。
+ * 純文字渲染（Part 10.4）。預設 `expanded: true`（完整明細）、預設 display。
+ * 各列內容缺欄位時整段省略，不留下孤立分隔。
  */
-export function renderEntry(entry: RouteEntry, options: { expanded?: boolean } = {}): string {
-  const expanded = options.expanded ?? true;
-  const view = buildEntryView(entry, expanded);
+export function renderEntry(
+  entry: RouteEntry,
+  options: { expanded?: boolean; display?: DisplayConfig } = {},
+): string {
+  const view = buildEntryView(entry, options.display);
   const lines = [plain(view.head)];
-
-  if (expanded) {
-    // 空 rows 退回收合脈絡列，避免只剩孤零零的首行。
-    const rows = view.rows.length > 0 ? view.rows : [{ label: "", segments: view.summary }];
-    rows.forEach((row, i) => {
-      const rail = i === rows.length - 1 ? "└ " : "├ ";
-      const label = row.label ? padRowLabel(row.label) : "";
-      lines.push(`${rail}${label}${plain(row.segments)}`);
-    });
-  } else if (view.summary.length > 0) {
-    lines.push(plain(view.summary));
+  for (const line of composeLines(view, options)) {
+    lines.push(`${line.rail}${line.label}${plain(line.segments)}`);
   }
-
   return lines.join("\n");
 }

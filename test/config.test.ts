@@ -425,3 +425,88 @@ test("a fact without a price is never banded (capability alone must not place it
   const bands = sliceBands(ranked, [1, 5, 15, 44, null]);
   assert.ok(bands.every((band) => band.length === 0), "an unpriced model appears in no derived chain");
 });
+
+// ---------------------------------------------------------------------------
+// display（Part 3.1 呈現設定）
+// ---------------------------------------------------------------------------
+
+test("display defaults to the standard look when unset", () => {
+  const { config } = loadConfig(NO_ENV, { filePath: "/nonexistent/config.json" });
+  assert.equal(config.display.detail, "standard");
+  assert.deepEqual(config.display.fields, [
+    "kind",
+    "demand",
+    "thinking",
+    "classify",
+    "budget",
+    "reason",
+    "notes",
+  ]);
+  assert.equal(config.display.badge, true);
+  assert.equal(config.display.color, "rich");
+  assert.equal(config.display.hint, true);
+  assert.equal(config.display.rails, true);
+});
+
+test("display merges per subkey and keeps the rest at defaults", () => {
+  const { path, cleanup } = withTempConfig({
+    display: { detail: "full", hint: false, fields: ["thinking", "classify"] },
+  });
+  try {
+    const { config } = loadConfig(NO_ENV, { filePath: path });
+    assert.equal(config.display.detail, "full");
+    assert.equal(config.display.hint, false);
+    assert.deepEqual(config.display.fields, ["thinking", "classify"]);
+    assert.equal(config.display.badge, true, "untouched subkeys keep defaults");
+    assert.equal(config.display.color, "rich");
+    assert.equal(config.display.rails, true);
+  } finally {
+    cleanup();
+  }
+});
+
+test("display drops bad values with warnings and keeps defaults", () => {
+  const { path, cleanup } = withTempConfig({
+    display: { detail: "huge", fields: ["kind", "nope"], badge: "yes", hue: "blue" },
+  });
+  try {
+    const { config, warnings } = loadConfig(NO_ENV, { filePath: path });
+    assert.equal(config.display.detail, "standard");
+    assert.deepEqual(config.display.fields, [
+      "kind",
+      "demand",
+      "thinking",
+      "classify",
+      "budget",
+      "reason",
+      "notes",
+    ]);
+    assert.equal(config.display.badge, true);
+    assert.ok(warnings.some((w) => w.includes("display.detail")), "bad detail warned");
+    assert.ok(warnings.some((w) => w.includes("display.fields")), "bad fields warned");
+    assert.ok(warnings.some((w) => w.includes("display.badge")), "bad badge warned");
+    assert.ok(warnings.some((w) => w.includes("display.hue")), "unknown subkey warned");
+  } finally {
+    cleanup();
+  }
+});
+
+test("display.fields de-duplicates while keeping order", () => {
+  const { path, cleanup } = withTempConfig({ display: { fields: ["thinking", "kind", "thinking"] } });
+  try {
+    const { config } = loadConfig(NO_ENV, { filePath: path });
+    assert.deepEqual(config.display.fields, ["thinking", "kind"]);
+  } finally {
+    cleanup();
+  }
+});
+
+test("validatePatch accepts display subkeys and rejects unknown ones", () => {
+  assert.equal(validatePatch("display", { detail: "compact" }), null);
+  assert.equal(validatePatch("display", { fields: ["kind"], rails: false }), null);
+  assert.match(String(validatePatch("display", { detail: "huge" })), /detail/);
+  assert.match(String(validatePatch("display", { fields: ["nope"] })), /fields/);
+  assert.match(String(validatePatch("display", { hue: "blue" })), /unknown setting/);
+  assert.match(String(validatePatch("display", {})), /at least one/);
+  assert.ok(WRITABLE_KEYS.includes("display"), "display is writable through /compass-set and compass_config");
+});

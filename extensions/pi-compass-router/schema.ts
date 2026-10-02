@@ -102,6 +102,51 @@ export interface ThinkingConfig {
   [kind: string]: ThinkingLevel | undefined;
 }
 
+/** 呈現密度（Part 3.1 `display.detail`、Part 10.4）：收合時顯示到什麼程度。 */
+export type DisplayDetail = "compact" | "standard" | "full";
+
+/**
+ * 收合列可出現的欄位（Part 3.1 `display.fields`）。陣列順序 = 顯示順序；
+ * 展開明細列不受影響（永遠攤開全部）。
+ */
+export type DisplayField = "kind" | "demand" | "thinking" | "classify" | "budget" | "reason" | "notes";
+
+/** 配色（Part 3.1 `display.color`）：`rich` 跟隨主題全彩；`mono` 只留明暗/粗細。 */
+export type DisplayColor = "rich" | "mono";
+
+/** 呈現設定（Part 10.4 視覺規格的可調部分）。 */
+export interface DisplayConfig {
+  detail: DisplayDetail;
+  fields: DisplayField[];
+  badge: boolean;
+  color: DisplayColor;
+  hint: boolean;
+  rails: boolean;
+}
+
+/** display 枚舉的唯一來源（load.ts / wizard.ts 共用）。 */
+export const DISPLAY_DETAILS: readonly DisplayDetail[] = ["compact", "standard", "full"];
+export const DISPLAY_FIELDS: readonly DisplayField[] = [
+  "kind",
+  "demand",
+  "thinking",
+  "classify",
+  "budget",
+  "reason",
+  "notes",
+];
+export const DISPLAY_COLORS: readonly DisplayColor[] = ["rich", "mono"];
+
+/** display 預設（DEFAULT_CONFIG 與渲染端 fallback 共用，單一來源）。 */
+export const DISPLAY_DEFAULTS: DisplayConfig = {
+  detail: "standard",
+  fields: [...DISPLAY_FIELDS],
+  badge: true,
+  color: "rich",
+  hint: true,
+  rails: true,
+};
+
 /** 內建層級候選鏈（Part 3.1 `routes`；預設鏈內容見 Part 13 #7，尚未定案）。 */
 export type RoutesConfig = Record<Tier, Target[]>;
 
@@ -139,6 +184,7 @@ export interface CompassConfig {
   stickiness: boolean;
   cache: SwitchCacheConfig;
   thinking: ThinkingConfig;
+  display: DisplayConfig;
 }
 
 /**
@@ -291,6 +337,8 @@ export const DEFAULT_CONFIG: CompassConfig = {
     cooldownSeconds: 0,
   },
   thinking: {},
+  // 呈現預設 = 「標準」風格：徽章 + 脈絡一列、全彩、expand 提示、樹狀導軌。
+  display: { ...DISPLAY_DEFAULTS, fields: [...DISPLAY_DEFAULTS.fields] },
 };
 
 /** 每層預設 thinking（Part 5 Stage 2 `TIER_THINKING`）。 */

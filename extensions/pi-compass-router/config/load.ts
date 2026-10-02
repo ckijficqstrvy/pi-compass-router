@@ -7,11 +7,15 @@ import { MODEL_FACTS, factsValid, rankedFacts, sliceBands } from "../policy/fact
 import { ceilingFor, filterChain, insertPrefer } from "../policy/filter.js";
 import {
   DEFAULT_CONFIG,
+  DISPLAY_COLORS,
+  DISPLAY_DETAILS,
+  DISPLAY_FIELDS,
   PROFILE_CEILINGS,
   TIERS,
   TIER_CAPABILITY_FLOOR,
   TIER_THINKING,
   type CompassConfig,
+  type DisplayField,
   type Target,
   type TaskKindSpec,
   type ThinkingLevel,
@@ -70,6 +74,7 @@ const TOP_LEVEL_KEYS: readonly string[] = [
   "stickiness",
   "cache",
   "thinking",
+  "display",
 ];
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
@@ -174,6 +179,7 @@ function applyFilePatch(
     ),
     cache: { ...base.cache },
     thinking: { ...base.thinking },
+    display: { ...base.display, fields: [...base.display.fields] },
   };
 
   for (const [key, value] of Object.entries(patch)) {
@@ -234,6 +240,40 @@ function applyFilePatch(
             else warnings.push("config.json: classify.confidenceThreshold must be within 0-1 — ignored");
           } else {
             warnings.push(`config.json: unknown key "classify.${ck}" dropped`);
+          }
+        }
+        break;
+      }
+      case "display": {
+        if (!isRecord(value)) {
+          warnings.push("config.json: display must be an object — ignored");
+          break;
+        }
+        for (const [dk, dv] of Object.entries(value)) {
+          if (dk === "detail") {
+            if (inSet(dv, DISPLAY_DETAILS)) next.display.detail = dv as CompassConfig["display"]["detail"];
+            else warnings.push(`config.json: display.detail must be ${DISPLAY_DETAILS.join("|")} — ignored`);
+          } else if (dk === "color") {
+            if (inSet(dv, DISPLAY_COLORS)) next.display.color = dv as CompassConfig["display"]["color"];
+            else warnings.push(`config.json: display.color must be ${DISPLAY_COLORS.join("|")} — ignored`);
+          } else if (dk === "badge" || dk === "hint" || dk === "rails") {
+            if (typeof dv === "boolean") next.display[dk] = dv;
+            else warnings.push(`config.json: display.${dk} must be a boolean — ignored`);
+          } else if (dk === "fields") {
+            if (isStringArray(dv) && dv.every((f) => (DISPLAY_FIELDS as readonly string[]).includes(f))) {
+              const seen = new Set<string>();
+              const fields: DisplayField[] = [];
+              for (const f of dv) {
+                if (seen.has(f)) continue;
+                seen.add(f);
+                fields.push(f as DisplayField);
+              }
+              next.display.fields = fields;
+            } else {
+              warnings.push(`config.json: display.fields must be a list of ${DISPLAY_FIELDS.join("|")} — ignored`);
+            }
+          } else {
+            warnings.push(`config.json: unknown key "display.${dk}" dropped`);
           }
         }
         break;
@@ -679,6 +719,28 @@ const classifyCheck: Check = (v) => {
   return Object.keys(v).length > 0 ? ok() : bad("expected at least one classify setting");
 };
 
+const displayCheck: Check = (v) => {
+  if (!isRecord(v)) return bad("expected an object");
+  const fields: Record<string, Check> = {
+    detail: enumCheck(DISPLAY_DETAILS),
+    color: enumCheck(DISPLAY_COLORS),
+    badge: bool,
+    hint: bool,
+    rails: bool,
+    fields: (x) =>
+      isStringArray(x) && x.every((f) => (DISPLAY_FIELDS as readonly string[]).includes(f))
+        ? ok()
+        : bad(`expected a list of ${DISPLAY_FIELDS.join("|")}`),
+  };
+  for (const [key, value] of Object.entries(v)) {
+    const check = fields[key];
+    if (!check) return bad(`display.${key}: unknown setting`);
+    const problem = check(value);
+    if (problem) return bad(`display.${key}: ${problem}`);
+  }
+  return Object.keys(v).length > 0 ? ok() : bad("expected at least one display setting");
+};
+
 const PATCH_CHECKS: Record<string, Check> = {
   enabled: bool,
   useDefaultModels: bool,
@@ -723,6 +785,7 @@ const PATCH_CHECKS: Record<string, Check> = {
   cache: cacheCheck,
   thinking: recordOf(nullableItem(enumCheck(THINKING_LEVELS)), "thinking pin"),
   specialistPriority: recordOf(nullableItem(nonEmptyStringArray), "task-kind -> model id list"),
+  display: displayCheck,
 };
 
 /**
@@ -808,6 +871,7 @@ const OBJECT_MERGE_KEYS: ReadonlySet<string> = new Set([
   "specialistPriority",
   "freePool",
   "xpremium",
+  "display",
 ]);
 
 /** `null` 本身是「值」的子鍵（null = 無上限，不是刪除標記）。 */

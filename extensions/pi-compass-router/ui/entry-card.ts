@@ -1,18 +1,20 @@
 // ui/entry-card.ts — transcript entry 的主題化卡片渲染（SPEC Part 10.4 視覺規格）。
 //
-// 內容全部來自 `entries.ts` 的 `buildEntryView`（單一來源）；本檔只做
-// Tone → theme token 的映射與卡片排版。收合一列脈絡、展開樹狀明細，
+// 內容全部來自 `entries.ts` 的 `buildEntryView` + `composeLines`（單一來源）；
+// 本檔只做 Tone → theme token 的映射與卡片排版。收合一列脈絡、展開樹狀明細，
 // 以 accent 徽章 + customMessageBg 卡片底把路由決策從 transcript 中凸顯出來。
+// 呈現細節由 `display` 設定控制（Part 3.1）：密度、欄位、徽章、配色、提示、導軌。
 import { keyHint, type Theme, type ThemeColor } from "@earendil-works/pi-coding-agent";
 import { Box, Text, type Component } from "@earendil-works/pi-tui";
 
 import {
   buildEntryView,
-  padRowLabel,
+  composeLines,
   type EntrySegment,
   type RouteEntry,
   type Tone,
 } from "./entries.js";
+import { DISPLAY_DEFAULTS, type DisplayConfig } from "../schema.js";
 
 /** 層級色階：cheap → 中性 → 強 → 昂貴（quick…xpremium 由低到高）。 */
 const TIER_FG: Record<string, ThemeColor> = {
@@ -34,11 +36,35 @@ const THINKING_FG: Record<string, ThemeColor> = {
   max: "thinkingMax",
 };
 
+/** 單色模式（`display.color: "mono"`）：只留明暗/粗細，適合截圖與淺色主題。 */
+function monoPaint(text: string, tone: Tone, theme: Theme): string {
+  switch (tone) {
+    case "badge":
+    case "title":
+    case "switched":
+    case "held":
+    case "notify":
+    case "skipped":
+    case "unrouted":
+      return theme.bold(text);
+    case "label":
+    case "muted":
+      return theme.fg("muted", text);
+    case "dim":
+    case "rail":
+      return theme.fg("dim", text);
+    default:
+      return tone.startsWith("tier:") || tone.startsWith("thinking:") ? theme.bold(text) : theme.fg("text", text);
+  }
+}
+
 /** 一段段落上色。badge 加底色徽章；`tier:*`／`thinking:*` 前綴走色階表。 */
-function paint(part: EntrySegment, theme: Theme): string {
+function paint(part: EntrySegment, theme: Theme, display: DisplayConfig): string {
   const t = part.text;
+  if (display.color === "mono") return monoPaint(t, part.tone, theme);
   switch (part.tone) {
     case "badge":
+      if (!display.badge) return theme.fg("muted", t);
       // accent 底 + 卡片底色字：整塊 entry 的視覺錨點。
       return theme.style(` ${t} `, { fg: theme.colors.customMessageBg, bg: theme.colors.accent, bold: true });
     case "title":
@@ -86,12 +112,12 @@ function paint(part: EntrySegment, theme: Theme): string {
   }
 }
 
-function paintAll(segments: EntrySegment[], theme: Theme): string {
-  return segments.map((s) => paint(s, theme)).join("");
+function paintAll(segments: EntrySegment[], theme: Theme, display: DisplayConfig): string {
+  return segments.map((s) => paint(s, theme, display)).join("");
 }
 
 /** expand 提示。keyHint 依賴已初始化的 keybindings/theme；萬一不在 TUI 環境就退回固定字串，不讓整張卡片炸掉。 */
-function expandHint(theme: Theme): string {
+function expandHint(theme: Theme, display: DisplayConfig): string {
   try {
     return theme.fg("dim", keyHint("app.tools.expand", "for the full breakdown"));
   } catch {
@@ -100,37 +126,32 @@ function expandHint(theme: Theme): string {
 }
 
 /**
- * 渲染 entry 卡片。
+ * 渲染 entry 卡片（Part 10.4）。
  *
- * 收合：徽章首行 + 一列脈絡 + expand 提示；展開：首行 + 樹狀明細列
- * （`├`/`└`，標籤欄固定寬對齊）。卡片底 `customMessageBg`，與官方
- * custom-entry 範例一致。
+ * 顯示哪些列由 `composeLines`（吃 `display`）決定：收合 = 脈絡一列
+ * （`detail: "compact"` 只留首行、`"full"` 直接攤開明細）、展開 = 樹狀列。
+ * 卡片底 `customMessageBg`，與官方 custom-entry 範例一致。
  */
 export function renderEntryCard(
   entry: RouteEntry,
-  options: { expanded: boolean },
+  options: { expanded: boolean; display?: DisplayConfig },
   theme: Theme,
 ): Component {
-  const view = buildEntryView(entry, options.expanded);
+  const display = options.display ?? DISPLAY_DEFAULTS;
+  const view = buildEntryView(entry, display);
   const box = new Box(1, 1, (text) => theme.bg("customMessageBg", text));
-  box.addChild(new Text(paintAll(view.head, theme), 0, 0));
+  box.addChild(new Text(paintAll(view.head, theme, display), 0, 0));
 
-  if (options.expanded) {
-    // 空 rows 退回收合脈絡列，避免只剩孤零零的首行。
-    const rows = view.rows.length > 0 ? view.rows : [{ label: "", segments: view.summary }];
-    rows.forEach((row, i) => {
-      const rail = i === rows.length - 1 ? "└ " : "├ ";
-      const line =
-        theme.fg("borderMuted", rail) +
-        (row.label ? theme.fg("customMessageLabel", padRowLabel(row.label)) : "") +
-        paintAll(row.segments, theme);
-      box.addChild(new Text(line, 0, 0));
-    });
-  } else {
-    const hint = expandHint(theme);
-    const summary = paintAll(view.summary, theme);
-    box.addChild(new Text(summary ? `${summary}  ${hint}` : hint, 0, 0));
-  }
+  // expand 提示：還有明細可展開時才顯示（收合 + 非 full），接在最後一列尾巴。
+  const hint = display.hint && !options.expanded && display.detail !== "full" ? expandHint(theme, display) : null;
+  const lines = composeLines(view, { expanded: options.expanded, display });
+  lines.forEach((line, i) => {
+    const rail = line.rail !== "" ? theme.fg("borderMuted", line.rail) : "";
+    const label = line.label !== "" ? theme.fg("customMessageLabel", line.label) : "";
+    const tail = hint !== null && i === lines.length - 1 ? `  ${hint}` : "";
+    box.addChild(new Text(rail + label + paintAll(line.segments, theme, display) + tail, 0, 0));
+  });
+  if (hint !== null && lines.length === 0) box.addChild(new Text(hint, 0, 0));
 
   return box;
 }

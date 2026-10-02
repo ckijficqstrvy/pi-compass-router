@@ -164,17 +164,18 @@ test("分類後端的 cloud 代號也要有標籤往返（不露裸代號）", (
 // 分組導航
 // ---------------------------------------------------------------------------
 
-test("主選單是六個分組列，各列帶狀態摘要", async () => {
+test("主選單是七個分組列，各列帶狀態摘要", async () => {
   const config = freshConfig();
   const s = scripted({ menu: [] }); // 只看主選單
   await runSettingsWizard(config, s.hooks);
 
   const main = Object.entries(s.rowsSeen).find(([label]) => label.startsWith("compass 設定"))?.[1] ?? [];
-  assert.equal(main.length, 7, "六組 + 結束");
+  assert.equal(main.length, 8, "七組 + 結束");
   assert.ok(main[0].startsWith("① 路由行為"), main[0]);
   assert.ok(main[2].includes("自動"), `③ 標列要帶來源摘要：${main[2]}`);
   assert.ok(main[2].includes("專家 10 種"), main[2]);
-  assert.equal(main[6], "結束");
+  assert.ok(main[5].startsWith("⑥ 顯示與呈現"), main[5]);
+  assert.equal(main[7], "結束");
 });
 
 test("組內選單列顯示目前值，項目靠列前綴認列", async () => {
@@ -656,13 +657,13 @@ test("過濾規則：deny 清單切換（✓ 標記），只寫被改的清單",
 });
 
 // ---------------------------------------------------------------------------
-// ⑥ 重設・診斷
+// ⑦ 重設・診斷
 // ---------------------------------------------------------------------------
 
 test("重設：選鍵 → 確認 → 寫回 DEFAULT 值", async () => {
   const config = freshConfig({ mode: "auto", budget: { ...DEFAULT_CONFIG.budget, dailyUsd: 999 } });
   const s = scripted({
-    menu: ["⑥ 重設・診斷", "重設"],
+    menu: ["⑦ 重設・診斷", "重設"],
     answers: { "重設哪一項": (options) => options.find((row) => row.startsWith("budget")) as string, "重設 budget 回預設？": "確定，重設" },
   });
 
@@ -676,7 +677,7 @@ test("重設：選鍵 → 確認 → 寫回 DEFAULT 值", async () => {
 test("重設：選「取消」就不寫檔", async () => {
   const config = freshConfig({ mode: "auto" });
   const s = scripted({
-    menu: ["⑥ 重設・診斷", "重設"],
+    menu: ["⑦ 重設・診斷", "重設"],
     answers: { "重設哪一項": (options) => options.find((row) => row.startsWith("mode")) as string, "重設 mode 回預設？": "取消" },
   });
 
@@ -697,7 +698,7 @@ test("看鏈的來源：標出你寫的 vs 自動派生", async () => {
     },
   });
   const s = scripted({
-    menu: ["⑥ 重設・診斷", "看鏈的來源"],
+    menu: ["⑦ 重設・診斷", "看鏈的來源"],
     answers: { "看鏈的來源：選層級": (options) => options.find((row) => row.startsWith("quick")) as string },
   });
 
@@ -711,13 +712,67 @@ test("看鏈的來源：標出你寫的 vs 自動派生", async () => {
 });
 
 test("測試分類器：有掛點跑一輪，沒掛點明說", async () => {
-  const withHook = scripted({ menu: ["⑥ 重設・診斷", "測試分類器"], probe: "laya 21ms · kind chat 95% · cache miss" });
+  const withHook = scripted({ menu: ["⑦ 重設・診斷", "測試分類器"], probe: "laya 21ms · kind chat 95% · cache miss" });
   await runSettingsWizard(freshConfig(), withHook.hooks);
   assert.match(withHook.notices.join("\n"), /laya 21ms · kind chat 95%/);
 
-  const withoutHook = scripted({ menu: ["⑥ 重設・診斷", "測試分類器"] });
+  const withoutHook = scripted({ menu: ["⑦ 重設・診斷", "測試分類器"] });
   await runSettingsWizard(freshConfig(), withoutHook.hooks);
   assert.match(withoutHook.notices.join("\n"), /不支援測試分類器/);
+});
+
+// ---------------------------------------------------------------------------
+// ⑥ 顯示與呈現
+// ---------------------------------------------------------------------------
+
+test("顯示：呈現密度寫 display patch（只帶被改的子鍵）", async () => {
+  const config = freshConfig();
+  const s = scripted({
+    menu: ["⑥ 顯示與呈現", "呈現密度"],
+    answers: { "呈現密度（目前：standard）": "full — 直接攤開明細" },
+  });
+
+  await runSettingsWizard(config, s.hooks);
+
+  assert.deepEqual(s.writes[0], ["display", { detail: "full" }]);
+  assert.equal(config.display.detail, "full", "活設定反映編輯");
+  assert.equal(config.display.badge, true, "沒動的子鍵不變");
+});
+
+test("顯示：收合列欄位 toggle 迴圈，完成才一次落檔", async () => {
+  const config = freshConfig();
+  let calls = 0;
+  const s = scripted({
+    menu: ["⑥ 顯示與呈現", "收合列欄位"],
+    answers: {
+      "收合列欄位：選一項切換": (options) => {
+        calls += 1;
+        return calls === 1
+          ? (options.find((row) => row === "✓ demand") as string)
+          : (options.find((row) => row.startsWith("←")) as string);
+      },
+    },
+  });
+
+  await runSettingsWizard(config, s.hooks);
+
+  assert.equal(s.writes.length, 1, "完成才寫一次");
+  assert.deepEqual(s.writes[0], [
+    "display",
+    { fields: ["kind", "thinking", "classify", "budget", "reason", "notes"] },
+  ]);
+});
+
+test("顯示：欄位 toggle 沒動就不寫檔", async () => {
+  const config = freshConfig();
+  const s = scripted({
+    menu: ["⑥ 顯示與呈現", "收合列欄位"],
+    answers: { "收合列欄位：選一項切換": (options) => options.find((row) => row.startsWith("←")) as string },
+  });
+
+  await runSettingsWizard(config, s.hooks);
+
+  assert.equal(s.writes.length, 0, "無變更 → 取消");
 });
 
 // ---------------------------------------------------------------------------
