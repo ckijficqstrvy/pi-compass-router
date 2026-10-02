@@ -1018,6 +1018,56 @@ pi-compass/
 └── tsconfig.json
 ```
 
+#### `index.ts` 接線契約（2026-10-01 補，寫 `index.ts` 前定）
+
+原規格只有 Part 11 目錄裡的 `# pi 接線：事件、命令、工具、切換` 一行，
+**沒定義它長什麼樣**（骨架只有 `register()` 命名匯出，而 pi 要求
+`export default` 工廠）。本節定案。
+
+**pi ExtensionAPI 實測到的硬事實**（讀 `@earendil-works/pi-coding-agent`
+的 `docs/extensions.md` 與 `dist/core/extensions/types.d.ts` 得到，非猜）：
+
+| 事實 | 影響 |
+| --- | --- |
+| pi 載入擴充要 **`export default function (pi: ExtensionAPI)`** | 骨架的 `register()` 命名匯出**載入會報錯**（實測：`does not export a valid factory function`）。改為 default 工廠，`register()` 可保留為別名。 |
+| `pi.setModel(model: Model)` 收**物件**不是字串，回 `Promise<boolean>` | Stage 5 的 `setModel("provider/model")` 要先經 `ctx.modelRegistry.find(provider, modelId)` 解析成 `Model`；回 `false` = 認證未配 → 当作 fail-open（不切、entry 記原因）。 |
+| `ctx.model` 是當前 `Model`、`ctx.modelRegistry.find()` / `.getAvailable()` | stickiness 比對與「可用性回退」都拿這裡；`find` 回 `undefined` = 不可用。 |
+| `pi.setThinkingLevel(level)` 同步、`pi.getThinkingLevel()` 讀回 | Stage 5 read-back 直接接。pi 的 `ThinkingLevel` = `off\|minimal\|low\|medium\|high\|xhigh\|max`，**與 compass 完全一致**，無需轉換。 |
+| `pi.appendEntry(customType, data)` + `pi.registerEntryRenderer` | Stage 5 的 transcript entry 走這裡（`customType: "compass"`，**不进 LLM context**）。渲染用 `renderEntry()`。 |
+| `pi.on("before_agent_start", …)` 拿 `event.prompt` | **路由鉤子**：每轮 agent 前跑 Stage 1–5。`turn_start` 只有 `turnIndex` 没 prompt，故用 `before_agent_start`。 |
+| `pi.registerCommand(name, {handler: (args, ctx)})` | `/compass*` 9 個命令（Part 10.1）。`ctx.ui.notify` 顯示、`ctx.ui.confirm` 問 confirm 模式。 |
+| `pi.registerTool({name, parameters(TypeBox), execute})` | `compass_route` / `compass_config`（Part 1）。execute 回 `{content:[{type:"text",text}], details}`。 |
+| `ctx.mode === "tui"` 才有完整 UI；JSON/print 模式沒 UI | 命令的 `ctx.ui.*` 要 guard；`registerTool` 不依赖 UI。 |
+| 工厂**不啟動行程/計時器**；長生命資源從 `session_start` 開、`session_shutdown` 收 | laya 子行程在 `session_start` warm、`session_shutdown` dispose（Part 4.2）。 |
+
+**接線清單（`index.ts` 逐項）**：
+
+1. `export default function (pi: ExtensionAPI)` —— 唯一入口。
+2. **session lifecycle**：`session_start` → `loadConfig()` + laya `warm()`；
+   `session_shutdown` → `dispose()`。
+3. **路由鉤子** `before_agent_start(event, ctx)`：
+   - 若 `enabled === false` → 直接 return（不分类、不切）。
+   - Stage 1 classify（带 cache、AbortSignal）、Stage 2 compose、
+     Stage 3 `selectTargets`、Stage 4 `guard`（state 从 `ctx.model` +
+     `loadSpend` 组）、Stage 5 `applyRoute`（hooks 接 `ctx` 的
+     `setModel`/`setThinkingLevel`/`appendEntry`）。
+   - confirm 模式的 `needsConfirm` → `ctx.ui.confirm()`（有 UI 時）；
+     無 UI（JSON/print）→ 当作 `notify`（不切，fail-safe）。
+   - **整个鉤子包在 try/catch**（Part 2 fail-open：任何异常都不得擋住回合）。
+4. **命令**：`compass`（狀態）、`compass-set`（wizard）、`compass` 子命令
+   （on/off/mode/budget/why/revert/suggest）、`compass-route`。
+   （Part 10.1 以 `compass` 前綴註冊，子命令在 handler 解析 args。）
+5. **工具**：`compass_route`（分类任意文字回建议）、`compass_config`
+   （`validatePatch`/`writeConfigPatch`）。
+6. **entry 渲染**：`registerEntryRenderer("compass", …)` 用 `renderEntry()`。
+
+**不做**：`cloud.ts` 仍阻塞（Part 4.3），`classify.provider: "cloud"` 时
+鉤子 fail-open 并在 status 明说不可用（不 spawn cloud）。
+
+**驗收 3 的形狀**：`pi -ne -e extensions/pi-compass-router/index.ts -p "<prompt>"`
+必須 exit 0（載入）且 transcript 有一條 `compass → …` entry（完成一次切換）。
+`-ne` 禁 discovery、`-e` 显式载入；`-p` 是非交互单发 prompt。
+
 **相依方向**（避免迴圈）：
 `schema` ← `config` ← `classify` / `policy` ← `route` ← `index`
 `budget` / `cache` 被 `route/guard` 單向依賴。

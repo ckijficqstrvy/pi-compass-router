@@ -151,7 +151,8 @@ test("every module exposes its skeleton exports", () => {
   }
 });
 
-test("skeleton functions throw not-implemented", () => {
-  // 尚未實作的入口（其餘模組已落地，見各模組測試）。
-  assert.throws(() => index.register(), /not implemented/);
+test("index exposes the default factory and register() points to it", () => {
+  // pi 要求 default 工廠（Part 11 接線契約）；register() 保留但明說該用 default。
+  assert.equal(typeof index.default, "function", "default factory is the pi entry point");
+  assert.throws(() => index.register(), /default export/);
 });
