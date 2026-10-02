@@ -21,7 +21,7 @@
  */
 
 import type { TaskKind, ThinkingLevel } from "../schema.js";
-import type { ClassifierSource, ClassifyInput, Judgment } from "./types.js";
+import type { ClassifierSource, Judgment } from "./types.js";
 
 /** 分類失敗（不阻擋回合；上層 fail-open，Part 5 Stage 1）。 */
 export class ClassifyError extends Error {
@@ -238,14 +238,6 @@ function pickAnswers(payload: unknown): Record<string, RawAnswer> {
 function answerOf(answers: Record<string, RawAnswer>, key: string): RawAnswer | undefined {
   const answer = answers[key];
   return answer && typeof answer === "object" ? answer : undefined;
-}
-
-function answerType(answer: RawAnswer): string | undefined {
-  if (typeof answer.type === "string") return answer.type;
-  if (answer.choice !== undefined) return "choice";
-  if (answer.score !== undefined) return "score";
-  if (answer.noul !== undefined) return "noul";
-  return undefined;
 }
 
 function confidenceOf(answer: RawAnswer | undefined): number | undefined {

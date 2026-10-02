@@ -392,6 +392,12 @@ Judgment     { kind, kindConfidence, complexity, capability,
     收 `{id, analysis}` → `parseAnalysis(analysis, latencyMs, {source:"laya",
     allowedKinds, menuKeys})` → 快取存 → 回 Judgment。
   - `warm()`：起子行程並等 `{"ready":true}`（不計入首輪延遲）。
+  - **重建即預熱**（2026-10-02）：任何 `reloadConfig()`（session 啟動、
+    `/compass-set`、`compass_config`）只要**重建**分類器就立刻 `warm()`；
+    而 reload **不再無條件重建**——分類器輸入（整個 `classify` 區塊 +
+    `taskKinds` + `modelPick`）沒變就沿用暖好的子行程，不然改個預算就會把
+    已載好的模型殺掉、下一句現載。決策與理由在 `classify/lifecycle.ts`，
+    覆寫在 `test/classifier-reload.test.ts`。
   - `dispose()`：殺子行程、清 pending（不 throw）。
   - **崩潰重啟**：子行程 exit → 標記需要重啟，下次呼叫重生；**連續失敗
     3 次**才置 `unavailable=true`（狀態列用），期間 `classify()` 直接
@@ -897,34 +903,41 @@ pressure = max(today÷dailyUsd, month÷monthlyUsd)
 
 ### 10.2 `/compass-set` 選單
 
-沿用你 `settings-ui.ts` 的結構（原創檔），項目改名：
+沿用你 `settings-ui.ts` 的結構（原創檔），項目改名；2026-10-02 兩次重構：
+先「能選不打」，再依使用者拍板改為**分組六列 + 組內編輯**（結構、選項、
+交互見下「能選不打・分組六列」）：
 
 ```
 /compass-set
-  compass 設定（↑↓ 選擇，Enter 確認，Esc 結束）
-  每日上限 ................ $5.00
-  每月上限 ................ $100.00
-  路由模式 ................ confirm — 每次切換前先問你
-  分類後端 ................ Laya 本機（離線）  ← 新增
-  Laya checkpoint .......... aac6fef/laya-multilingual-mlx  ← 新增
-  模型鏈 .................. quick 首選 … · high 首選 …
-  價格 profile ............ balanced
-  cache 感知 .............. 開 · 冷卻 300s
-  特殊情境（free-only）..... 關
-  任務最低層級 ............ 全部 10 種皆有下限：plan≥high · review≥high ·
-                            implement/debug/refactor/research/operate≥standard ·
-                            chat/explain/write≥quick
-  重設某項回預設 …
+  compass 設定（↑↓ 選組，Enter 進入，Esc 結束）
+  ① 路由行為 ........... notify · 粘住 開 · 挑模型 off
+  ② 預算與花費 .......... $5.00/日 · $12.00/月 · cheap
+  ③ 模型與層級 .......... quick 3（自動2·你寫1） · 專家 10 種
+  ④ 分類器 ............. laya · TTL 300s · timeout 800ms
+  ⑤ 政策與過濾 .......... deny 3 · ceilings 依 profile · prefer 1
+  ⑥ 重設・診斷 .......... 重設某項 · 測試分類器 · 看鏈的來源
   結束
+
+（點 ③ 進組內選單——每列帶目前值與來源摘要）
+  ③ 模型與層級：選一項
+    模型鏈 …… quick 3（自動2·你寫1） · high 3（自動3）
+    專家鏈 …… 10 種有專家鏈
+    prefer 首選 …… 1 層有偏好首選
+    任務最低層級 …… plan≥high · …（10 種）
+    xpremium 層 …… 關（premium 之上再一層）
+    內建模型鏈 …… 開（關 = 只用你自帶的模型）
+    ← 返回
 ```
 
 每項驗證 → 寫入 `config.json`（**時間戳備份落在同目錄**）
-→ 重載進執行中 session → 才重繪選單。
+→ 重載進執行中 session → 才重繪選單。**每個子編輯一律先 `pick`**；
+打字只出現在明寫的「自訂…（打字輸入）」之後，或候選集合根本為空時。
 
 保留你檔案裡的 helper 語意：
 `parseChain()`、`parseAmount()`、`providerLabel()`、
 `providerFromLabel()`、`modeLabel()`、`modeFromLabel()`、
-`runSettingsWizard(hooks)`。
+`runSettingsWizard(hooks)`；2026-10-02 新增 `tierLabel()`、
+`tierFromLabel()`、`CUSTOM_OPTION`。
 
 #### hooks 形狀與寫入路徑（2026-10-01 補，寫 `wizard.ts` 前定）
 
@@ -937,12 +950,22 @@ interface WizardHooks {
    *  實作即 `validatePatch(key, value)` 通過後合入 config.json。
    *  回 `null` 成功，回 `key: reason` 表示拒絕（選單不重繪、不落檔）。 */
   write(key: string, value: unknown): string | null;
-  /** 寫入後重載進執行中 session（Part 10.2：重載 → 才重繪）。 */
-  reload(): void | Promise<void>;
-  /** TUI 取一列輸入（選金額、選鏈字串）。回 `null` = 使用者取消（Esc）。 */
+  /** 寫入後重載進執行中 session（Part 10.2：重載 → 才重繪）。
+   *  **回傳重載後的設定**（2026-10-02 改）：接線層 reload 會換掉 session
+   *  的設定物件，不回傳就讓選單繼續畫在舊物件上；回 `void` 亦可。 */
+  reload(): CompassConfig | void | Promise<CompassConfig | void>;
+  /** TUI 取一列輸入（**只在「自訂…」之後被叫到**）。回 `null` = 取消（Esc）。 */
   prompt(label: string, initial?: string): Promise<string | null>;
-  /** TUI 從清單選一項（選 mode、profile）。回 `null` = 取消。 */
+  /** TUI 從清單選一項（子編輯的第一個互動一律是它）。回 `null` = 取消。 */
   pick(label: string, options: string[]): Promise<string | null>;
+  /** 候選來源（2026-10-02 新增，可選）：registry／本機快取等 I/O 在接線層。
+   *  **回空或未實作 → 該項以內建預設為種子、仍用選單**（能選就不打）。 */
+  candidates?(kind: "model" | "checkpoint" | "classifier"): string[] | Promise<string[]>;
+  /** 回饋（2026-10-02 新增，可選）：寫入被拒、輸入無效、診斷結果。 */
+  notify?(message: string, type?: "info" | "warning" | "error"): void;
+  /** 測試分類器（2026-10-02 新增，可選）：跑一輪真分類，回一列結果；
+   *  未實作 → ⑥ 的「測試分類器」明說不支援。 */
+  probeClassifier?(): Promise<string> | string;
 }
 ```
 
@@ -957,14 +980,86 @@ interface WizardHooks {
 | --- | --- |
 | `parseChain(s)` | `"provider/model, provider/model"` → `Target[]`（逗號分隔、去空白、跳過空段；無 `/` → provider 為 `""`）。往返於 `routes` 顯示字串。 |
 | `parseAmount(s)` | `"$5.00"`／`"5"`／`"5.5"` → `number`；負數、`NaN`、`非數字` → `null`。金額驗證。 |
-| `providerLabel(p)` | `"openrouter"` → `"OpenRouter"`；未登記 → 原樣回傳（不丟失 provider 名）。 |
+| `providerLabel(p)` | `"openrouter"` → `"OpenRouter"`；`"cloud"` → `"Cloud 遠端分類"`（分類後端兩種也登記，不然選單露裸代號）；未登記 → 原樣回傳（不丟失 provider 名）。 |
 | `providerFromLabel(l)` | `"OpenRouter"` → `"openrouter"`（不分大小寫）；未登記 → `null`。 |
 | `modeLabel(m)` | `auto`→`"auto — 自動切換"`、`confirm`→`"confirm — 每次切換前先問你"`、`notify`→`"notify — 只提醒不切換"`。 |
 | `modeFromLabel(l)` | 取前綴 token（`auto`/`confirm`/`notify`，不分大小寫）→ `Mode`；否則 `null`。 |
+| `profileLabel(p)` | `cheap` → `"cheap — 上限下修，更早用便宜模型（$/M 上限：quick $1 · standard $3 · high $10 · premium $25 · xpremium $50）"`——**三種定義（每層天花板）直接印在選項上**，數字取自 `PROFILE_CEILINGS`，`∞` = 無上限（2026-10-02 新增）。 |
+| `profileFromLabel(l)` | 取前綴 token（不分大小寫）→ `Profile`；否則 `null`。 |
+| `thinkingLabel(t)` | `high` → `"high — 多"` …（思考層級選單，2026-10-02 新增）。 |
+| `thinkingFromLabel(l)` | 取前綴 token → `ThinkingLevel`；否則 `null`。 |
+| `tierLabel(t)` | `quick`→`"quick — 最快最省"` … `xpremium`→`"xpremium — 需 xpremium.enabled"`（「任務最低層級」子選單）。 |
+| `tierFromLabel(l)` | 取前綴 token → `Tier`；不認識 → `null`（與 `modeFromLabel` 同法）。 |
+| `CUSTOM_OPTION` | 字面量 `"自訂…（打字輸入）"`——直接打值的入口；另一個打字入口是 `"搜尋…（打關鍵字縮小清單）"`（只打篩選字，命中清單仍用選的）。 |
 | `runSettingsWizard(hooks)` | 逐項選/驗證/寫/重載/重繪（見 Part 10.2 選單清單）。 |
 
 `providerLabel` 與 `modeLabel` 必須**往返一致**（`modeFromLabel(modeLabel(m)) === m`、
 `providerFromLabel(providerLabel(p)) === p`）——`settings-ui.test.ts` 對此覆寫。
+
+#### 能選不打・分組六列（2026-10-02 重構定案）
+
+原選單有四項要打字（金額、checkpoint id、鏈字串、`kind≥tier` 字串）與四個
+壞掉的項目（`分類後端` 露裸代號、`分類模型` cloud 時顯示錯值、`cache` 只能
+改開關、`重設` 選了不做事）；「能選不打」重寫後再依使用者拍板改為
+**分組六列 + 組內編輯**。三條鐵律：
+
+1. **能選就不打**：候選能枚舉（枚舉、預設值、事實檔、registry、OpenRouter
+   線上清單、本機快取、層級）一律 `pick`；打字只出現在「自訂…（打字
+   輸入）」（直接打值）與「搜尋…（打關鍵字縮小清單）」（只打篩選字）之後。
+2. **寫進去要能清**：config 寫入層支援 **patch `null` = 刪子鍵**
+   （`config/load.ts`）——prefer／ceilings／thinking／模型鏈都能
+   「改回自動／清除」，不再有單向門。
+3. **看得見誰決定**：組列與項目列帶**來源摘要**（`quick 3（自動2·你寫1）`），
+   ⑥ 有「看鏈的來源」逐條標「你寫的（鎖定）／自動派生」——呼應 L1 事實／
+   L2 政策／L3 显式分層。
+
+分組與開放範圍：
+
+| 組 | 項目（呈現方式） |
+| --- | --- |
+| ① 路由行為 | `enabled`、`mode`、`stickiness`、`modelPick`、`allowUnratedPicks`、`thinking`（pin 或某 kind → 層級，含**清除**）、`cache.*`（冷卻：0/5/15/30/60/120/300/600） |
+| ② 預算與花費 | `budget.dailyUsd/monthlyUsd`（無上限／沿用目前／預設檔位＋自訂）、`budget.softRatio/hardRatio`（**新增**：0.5–0.95 預設）、`profile`（**三種定義印在選項上**，`profileLabel`）、`freeOnly` |
+| ③ 模型與層級 | `routes.<tier>`（設為首選…／放到末尾…／移除…／**改回自動（清除你寫的）**／自訂整條字串…；**只寫被改的那一層**）、`kindModels.<kind>`（**新增**，同款動作＋改回層級鏈）、`prefer.<tier>`（**新增**，含清除）、`kindMinimumTier`、`xpremium.enabled`、`useDefaultModels` |
+| ④ 分類器 | `classify.provider`（選項講清楚用哪個分類器，帶目前模型）、`classify.model`/`classify.cloud.*`（laya → HF 快取；cloud → **只放 `provider=typesafe`**；內建預設當種子）、`classify.cache/cacheTtlSeconds`、`classify.timeoutMs/confidenceThreshold/minPromptChars/historyTurns`（**新增**：預設檔位＋自訂） |
+| ⑤ 政策與過濾 | `deny`/`allowProviders`（`✓`/`✗` 切換＋新增 glob）、`ceilings.<tier>`（**新增**：依 profile／各帶檔位／自訂／**清除**） |
+| ⑥ 重設・診斷 | `重設某項回預設`（含 `routes`/`kindModels` 整組回自動）、**測試分類器**（跑一輪真分類不切換，`hooks.probeClassifier`）、**看鏈的來源**（逐條標來源＋事實檔日期） |
+
+**仍不暴露的設定（先分析再決定給不給）**：
+
+| 鍵 | 不給的理由 |
+| --- | --- |
+| `suggest.scoresFile` | 檔案路徑，**沒有候選來源**也無法驗證存在；偶爾設一次，留 config.json／工具。 |
+| `classify.python` | 同上（Python 直譯器路徑）；改 config.json。 |
+| `taskKinds` `specialistPriority` `freePool` | 結構化手工資料（分類定義／模型池），列了也只是讓人誤選；改用 config.json。 |
+
+（舊版列為「不暴露」的 `thinking`／`ceilings`／`prefer`／「模型鏈整層清除」
+在 patch `null` 語意落地後**全部開放**——單向門解掉了，見
+`test/config-write.test.ts`。）
+
+候選來源集中在接線層（`index.ts`）與 `ui/sources.ts`：
+`candidates("model")` = `modelRegistry.getAvailable()` ∪ `openRouterModelKeys()`
+——**OpenRouter 最新模型清單**（`GET https://openrouter.ai/api/v1/models`，
+免金鑰；24h 磁碟快取 + stale-if-error，斷線回舊快取/空）。精選兩組——
+設定現用與事實檔——永不被截，registry/線上清單依字典序接在後（整體
+1000 筆安全上限）；清單太長走「搜尋…（打關鍵字縮小清單）」再選。
+2026-10-02：舊版只給 registry 多出來的 48 筆，`openai/gpt-6.1-sol`（排第
+294 位的新模型）直接選不到——現在不截斷＋可搜尋＋有線上來源；
+`candidates("checkpoint")` = 掃 HF 快取（`models--org--name` → `org/name`，
+只切第一組 `--`，支援 `HUGGINGFACE_HUB_CACHE`/`HF_HOME`）；
+`candidates("classifier")` = `cloudClassifierKeys(getModelsOfType("classifier"))`——
+**只留 `provider === "typesafe"`**：cloud 端點寫死 typesafe、其他 provider
+直接 throw（Part 4.3），而 registry 的分類模型多數掛在 openrouter 底下
+（id 形如 `~typesafe/jev-latest`；實測 `getAvailableOfType("classifier")`
+回的 9 筆**全是 openrouter/\***，選了就會寫出讓分類當場失效的設定——
+2026-10-02 修的那個「cloud 是壞的」）。來源回空時，**內建預設永遠當種子**，
+所以該項仍是選單（目前值／預設 ＋「自訂…」），打字一律只出現在
+「自訂…」之後。
+
+覆寫：`test/settings-wizard.test.ts`（腳本化 hooks 跑完整迴圈——分組導航、
+預設金額、兩段選取、改回自動、prefer/ceilings/thinking 清除、專家鏈、
+候選/無候選、寫入被拒、reload 回新物件、重設確認、deny 切換、
+分類後端選項、profile 定義、分類快取/參數、冷卻秒數、看鏈的來源、
+測試分類器、cloud 候選過濾、快取掃描）、`test/config-write.test.ts`
 
 #### 寫入實作 `writeConfigPatch()`（補進 `config/load.ts`）
 
@@ -973,15 +1068,21 @@ Part 3.4 只定義了 `validatePatch`（驗證），**沒有落檔函式**——
 
 ```ts
 /**
- * 驗證並把 patch 合入 config.json（Patch 非覆寫：只改指定鍵）。
- * 回 `null` 成功；回 `key: reason` 拒絕（不落檔）。
+ * 驗證並把 patch 結構化合入 config.json。回 `null` 成功；`key: reason` 拒絕。
  * 落檔前寫時間戳備份（同目錄，備份失敗不阻擋）。
+ * **Patch 非覆寫**：只動被提到的鍵，預設值/衍生鏈不物化進使用者檔案。
+ * **`null` = 刪子鍵**：`routes.<tier>`／`prefer.<tier>`／`ceilings.<tier>`／
+ * `thinking.<kind>` 等給 `null` → 從檔案移除（回預設/回自動派生）。
+ * 例外：`budget.dailyUsd/monthlyUsd` 的 `null` 是值（無上限）。
  */
 export function writeConfigPatch(patch: Record<string, unknown>, filePath = CONFIG_FILE): string | null
 ```
 
-行為：逐鍵 `validatePatch` → 全過才讀現檔、合入、寫回；任一不過 → 回第一個
-`key: reason`、**一個字都不寫**（原子：不能半寫）。
+行為：逐鍵 `validatePatch` → 全過才在**檔案物件**上結構化合併、寫回；
+任一不過 → 回第一個 `key: reason`、**一個字都不寫**（原子：不能半寫）。
+2026-10-02 改：舊版把整個預設設定物化進檔（所有鏈變 `explicit` → L1 停擺、
+`deny` 失效），新版只寫「現檔 ∪ patch」的鍵，並支援 `null` 刪除——
+覆寫 `test/config-write.test.ts`。
 
 ### 10.3 狀態列
 
@@ -1071,13 +1172,16 @@ pi-compass/
 | `pi.registerCommand(name, {handler: (args, ctx)})` | `/compass*` 9 個命令（Part 10.1）。`ctx.ui.notify` 顯示、`ctx.ui.confirm` 問 confirm 模式。 |
 | `pi.registerTool({name, parameters(TypeBox), execute})` | `compass_route` / `compass_config`（Part 1）。execute 回 `{content:[{type:"text",text}], details}`。 |
 | `ctx.mode === "tui"` 才有完整 UI；JSON/print 模式沒 UI | 命令的 `ctx.ui.*` 要 guard；`registerTool` 不依赖 UI。 |
-| 工厂**不啟動行程/計時器**；長生命資源從 `session_start` 開、`session_shutdown` 收 | laya 子行程在 `session_start` warm、`session_shutdown` dispose（Part 4.2）。 |
+| 工厂**不啟動行程/計時器**；長生命資源從 `session_start` 開、`session_shutdown` 收 | laya 子行程在重建分類器時預熱（session 啟動與設定寫入同一條路徑）、`session_shutdown` dispose（Part 4.2）。 |
 
 **接線清單（`index.ts` 逐項）**：
 
 1. `export default function (pi: ExtensionAPI)` —— 唯一入口。
-2. **session lifecycle**：`session_start` → `loadConfig()` + laya `warm()`；
-   `session_shutdown` → `dispose()`。
+2. **session lifecycle**：`session_start` → `loadConfig()` + 分類器重建/沿用
+   （`reloadClassifier`：輸入沒變就保留暖好的子行程，變了才重建並 `warm()`）；
+   `session_shutdown` → `dispose()`。**`/compass-set` 與 `compass_config` 的
+   每次寫入也走這條路徑**——路由設定永遠即時生效，分類器只在自己的輸入
+   變動時才動（2026-10-02，見 `classify/lifecycle.ts`）。
 3. **路由鉤子** `before_agent_start(event, ctx)`：
    - 若 `enabled === false` → 直接 return（不分类、不切）。
    - Stage 1 classify（带 cache、AbortSignal）、Stage 2 compose、

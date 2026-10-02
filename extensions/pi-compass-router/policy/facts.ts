@@ -15,7 +15,6 @@
  *
  * 檔案與實作均為本專案原創（Part 0.3 白名單）。
  */
-import type { Tier } from "../schema.js";
 import { TIERS } from "../schema.js";
 import FACTS from "../model-facts.json" with { type: "json" };
 

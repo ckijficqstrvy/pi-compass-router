@@ -11,7 +11,7 @@ import {
 import { ceilingFor } from "../extensions/pi-compass-router/policy/filter.js";
 import { factFor } from "../extensions/pi-compass-router/policy/facts.js";
 import { DEFAULT_CONFIG } from "../extensions/pi-compass-router/schema.js";
-import type { CompassConfig, Target, Tier } from "../extensions/pi-compass-router/schema.js";
+import type { CompassConfig } from "../extensions/pi-compass-router/schema.js";
 import type { Judgment } from "../extensions/pi-compass-router/classify/types.js";
 
 function config(overrides: Partial<CompassConfig> = {}): CompassConfig {
@@ -52,8 +52,6 @@ function judgment(overrides: Partial<Judgment> = {}): Judgment {
     ...overrides,
   };
 }
-
-const CHAIN = (targets: Target[]): Target[] => targets;
 
 // ---------------------------------------------------------------------------
 // targetKey 編碼（menu id 的形狀）

@@ -1,6 +1,6 @@
 {
-  "generatedAt": "2026-10-01",
-  "source": "capability: manual scores (AA intelligence index / Terminal-Bench cross-check), never auto-guessed; prices auto-synced from pi's model catalogue by `npm run refresh-facts` on 2026-10-01.",
+  "generatedAt": "2026-10-02",
+  "source": "capability: manual scores (AA intelligence index / Terminal-Bench cross-check), never auto-guessed; prices auto-synced by `npm run refresh-facts` from OpenRouter API (fallback: pi model catalogue) on 2026-10-02.",
   "models": [
     {
       "provider": "openrouter",
@@ -21,6 +21,16 @@
         "output": 50
       },
       "note": "OpenAI flagship"
+    },
+    {
+      "provider": "openrouter",
+      "model": "openai/gpt-6.1-sol",
+      "capability": 52,
+      "note": "AA intelligence index 52 (max effort; 42-52 by effort), TB4 56%, near-Astra agentic at ~1/5 cost; pro = reasoning.mode setting, not a separate model — cross-checked 2026-10-02 (artificialanalysis.ai)",
+      "price": {
+        "input": 2,
+        "output": 10
+      }
     },
     {
       "provider": "openrouter",
@@ -56,7 +66,7 @@
       "model": "~z-ai/glm-latest",
       "capability": 45,
       "price": {
-        "input": 0.13,
+        "input": 0.12,
         "output": 4
       },
       "note": "glm-5.3, agentic-terminal reputation"
@@ -76,8 +86,8 @@
       "model": "moonshotai/kimi-k3",
       "capability": 44,
       "price": {
-        "input": 3,
-        "output": 15
+        "input": 2.7,
+        "output": 13.5
       },
       "note": "1M ctx, Frontend Arena #1, weak terminal-agentic (TB4 13%)"
     },
@@ -96,8 +106,8 @@
       "model": "~z-ai/glm-flash-latest",
       "capability": 42,
       "price": {
-        "input": 0.02,
-        "output": 0.2475
+        "input": 0.02625,
+        "output": 0.9
       },
       "note": "glm-5.3-flash; #1 by OpenRouter monthly token volume"
     },
@@ -115,8 +125,8 @@
       "model": "deepseek/deepseek-v4-flash",
       "capability": 39,
       "price": {
-        "input": 0.08092,
-        "output": 0.16184
+        "input": 0.042,
+        "output": 0.084
       }
     },
     {
@@ -128,6 +138,16 @@
         "output": 10
       },
       "note": "claude-sonnet-5"
+    },
+    {
+      "provider": "openrouter",
+      "model": "openai/gpt-6-luna",
+      "capability": 37,
+      "note": "AA intelligence index 37 (max; 32-37 by effort), TB4 13%, fast/cheap tier — cross-checked 2026-10-02 (artificialanalysis.ai)",
+      "price": {
+        "input": 0.1,
+        "output": 0.5
+      }
     },
     {
       "provider": "openrouter",
@@ -143,8 +163,8 @@
       "model": "~deepseek/deepseek-pro-latest",
       "capability": 36,
       "price": {
-        "input": 0.123,
-        "output": 3.5
+        "input": 0.132,
+        "output": 0.396
       }
     },
     {

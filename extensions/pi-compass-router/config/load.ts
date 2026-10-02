@@ -609,6 +609,16 @@ function recordOf(itemCheck: Check, label: string): Check {
   };
 }
 
+/**
+ * 子項可為 `null`：**patch 層的 `null` = 刪掉該子鍵**（回預設／回自動
+ * 派生，2026-10-02 解單向門）。檔案層的 `null` 仍有各自的值意涵（如
+ * `ceilings.<tier>: null` = 無上限、`budget.dailyUsd: null` = 無上限），
+ * 兩層不衝突：寫入器從不把刪除標記寫進檔案（直接移除該子鍵）。
+ */
+function nullableItem(check: Check): Check {
+  return (v) => (v === null ? ok() : check(v));
+}
+
 const budgetCheck: Check = (v) => {
   if (!isRecord(v)) return bad("expected an object");
   const allowed = new Set(["dailyUsd", "monthlyUsd", "softRatio", "hardRatio"]);
@@ -680,9 +690,9 @@ const PATCH_CHECKS: Record<string, Check> = {
   modelPick: enumCheck(MODEL_PICKS),
   profile: enumCheck(PROFILES),
   classify: classifyCheck,
-  routes: recordOf(chainCheck, `per-tier model chains (${TIERS.join("|")})`),
-  kindModels: recordOf(chainCheck, "task-kind model chains"),
-  kindMinimumTier: recordOf(enumCheck(TIERS), "task-kind -> tier"),
+  routes: recordOf(nullableItem(chainCheck), `per-tier model chains (${TIERS.join("|")})`),
+  kindModels: recordOf(nullableItem(chainCheck), "task-kind model chains"),
+  kindMinimumTier: recordOf(nullableItem(enumCheck(TIERS)), "task-kind -> tier"),
   taskKinds: recordOf(
     (v) =>
       isRecord(v) && typeof v.label === "string" && isFiniteNumber(v.floor)
@@ -701,7 +711,6 @@ const PATCH_CHECKS: Record<string, Check> = {
     }
     return Object.keys(v).length > 0 ? ok() : bad("expected enabled and/or models");
   },
-  specialistPriority: recordOf(nonEmptyStringArray, "task-kind -> model id list"),
   suggest: (v) => (isRecord(v) && typeof v.scoresFile === "string" ? ok() : bad("expected {scoresFile: string}")),
   budget: budgetCheck,
   ceilings: recordOf(
@@ -710,9 +719,10 @@ const PATCH_CHECKS: Record<string, Check> = {
   ),
   deny: stringArray,
   allowProviders: stringArray,
-  prefer: recordOf(nonEmptyStringArray, "per-tier preferred models"),
+  prefer: recordOf(nullableItem(nonEmptyStringArray), "per-tier preferred models"),
   cache: cacheCheck,
-  thinking: recordOf(enumCheck(THINKING_LEVELS), "thinking pin"),
+  thinking: recordOf(nullableItem(enumCheck(THINKING_LEVELS)), "thinking pin"),
+  specialistPriority: recordOf(nullableItem(nonEmptyStringArray), "task-kind -> model id list"),
 };
 
 /**
@@ -727,12 +737,20 @@ export function validatePatch(key: string, value: unknown): string | null {
 }
 
 /**
- * 驗證並把 patch 合入 config.json（Part 3.4 三條規則的落檔實作）。
+ * 驗證並把 patch 結構化合入 config.json（Part 3.4 三條規則的落檔實作）。
  *
  * - **白名單 + 寫前驗證**：逐鍵跑 `validatePatch`，任一不過 → 回第一個
  *   `key: reason`、**一個字都不寫**（原子：不能半寫）。
- * - **Patch 非覆寫**：只把指定鍵合入現檔，其餘鍵原樣保留（合併由現有
- *   `applyFilePatch` 負責，與載入路徑同一份邏輯，不會漂移）。
+ * - **Patch 非覆寫**：只動 patch 提到的鍵；**預設值與衍生鏈永不物化進
+ *   使用者檔案**——舊版會把整個預設設定寫進檔，使所有鏈都變成
+ *   `explicit`：L1 事實自動推導整組停擺、`deny` 對它們失效
+ *   （显式勝政策）。2026-10-02 修。
+ * - **`null` = 刪除（單向門解藥）**：patch 裡 `routes.<tier>`／
+ *   `kindModels.<kind>`／`kindMinimumTier.<kind>`／`prefer.<tier>`／
+ *   `ceilings.<tier>`／`thinking.<kind>`／`specialistPriority.<kind>` 給
+ *   `null` → **從檔案移除該子鍵**（回預設／回自動派生），寫進去就能清。
+ *   例外：`budget.dailyUsd`／`budget.monthlyUsd` 的 `null` 是值（無上限）。
+ *   刪除標記從不落檔——寫入時直接移除，檔案層的 `null` 仍維持舊值意涵。
  * - **時間戳備份**：落檔前把現有檔複製為 `<name>.bak-<ISO 去冒號>`（同目錄）；
  *   備份失敗**不阻擋寫入**（備份是安全網不是鎖）。
  *
@@ -750,11 +768,10 @@ export function writeConfigPatch(
     if (problem) return problem;
   }
 
-  // 2. 讀現檔（不存在 = 空物件，不是錯誤）。
+  // 2. 在**檔案物件**上結構化合併（不是合入預設值）。
   const current = readJsonFile(filePath).patch ?? {};
-  const warnings: string[] = [];
-  const next = applyFilePatch({ ...DEFAULT_CONFIG } as CompassConfig, current, warnings);
-  const merged = applyFilePatch(next, patch, warnings);
+  const next = structuredClone(current) as Record<string, unknown>;
+  applyPatchToFile(next, patch);
 
   // 3. 時間戳備份（同目錄；失敗不阻擋）。
   if (existsSync(filePath)) {
@@ -766,24 +783,57 @@ export function writeConfigPatch(
     }
   }
 
-  // 4. 寫回（只有白名單鍵在 patch 裡，其餘來自現檔 + 預設的合併結果）。
+  // 4. 寫回（只有現檔 ∪ patch 的鍵；預設值不物化）。
   try {
     mkdirSync(dirname(filePath), { recursive: true });
-    const serializable = pickWritableKeys(merged);
-    writeFileSync(filePath, `${JSON.stringify(serializable, null, 2)}\n`, { mode: 0o600 });
+    writeFileSync(filePath, `${JSON.stringify(next, null, 2)}\n`, { mode: 0o600 });
   } catch (error) {
     return `${basename(filePath)}: write failed (${(error instanceof Error ? error.message : String(error)).slice(0, 120)})`;
   }
   return null;
 }
 
-/** 只挑白名單鍵序列化（Patch 非覆寫：衍生/預設值不寫回使用者檔案）。 */
-function pickWritableKeys(config: CompassConfig): Record<string, unknown> {
-  const out: Record<string, unknown> = {};
-  for (const key of WRITABLE_KEYS) {
-    out[key] = (config as unknown as Record<string, unknown>)[key];
+/** 子鍵逐項合併的頂層鍵（物件值；其餘鍵整值替換）。 */
+const OBJECT_MERGE_KEYS: ReadonlySet<string> = new Set([
+  "classify",
+  "routes",
+  "kindModels",
+  "kindMinimumTier",
+  "taskKinds",
+  "budget",
+  "cache",
+  "ceilings",
+  "prefer",
+  "thinking",
+  "specialistPriority",
+  "freePool",
+  "xpremium",
+]);
+
+/** `null` 本身是「值」的子鍵（null = 無上限，不是刪除標記）。 */
+const NULL_IS_VALUE_SUBKEYS: ReadonlySet<string> = new Set([
+  "budget.dailyUsd",
+  "budget.monthlyUsd",
+]);
+
+/**
+ * 把 patch 結構化合入**檔案物件**（Patch 非覆寫）：逐子鍵合併，子鍵值
+ * `null` = 刪除該子鍵（除非該子鍵的 `null` 是值）；沒提到的鍵/子鍵原樣
+ * 保留；合併後變空的物件直接移除。
+ */
+function applyPatchToFile(file: Record<string, unknown>, patch: Record<string, unknown>): void {
+  for (const [key, value] of Object.entries(patch)) {
+    if (OBJECT_MERGE_KEYS.has(key) && isRecord(value)) {
+      const target = isRecord(file[key]) ? (file[key] as Record<string, unknown>) : (file[key] = {});
+      for (const [sub, subValue] of Object.entries(value)) {
+        if (subValue === null && !NULL_IS_VALUE_SUBKEYS.has(`${key}.${sub}`)) delete target[sub];
+        else target[sub] = subValue;
+      }
+      if (Object.keys(target).length === 0) delete file[key];
+    } else {
+      file[key] = value;
+    }
   }
-  return out;
 }
 
 /** 供文件與工具提示列出可寫鍵（Part 3.4）。 */

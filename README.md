@@ -24,7 +24,7 @@ pi install npm:pi-compass-router
 | 命令 | 作用 |
 | --- | --- |
 | `/compass` | 顯示目前狀態：模式、花費、層級鏈、分類器狀態、最近一次決定 |
-| `/compass-set` | 設定選單（TUI pick-list，不耗 token；寫入 config.json 並附時間戳備份） |
+| `/compass-set` | 設定選單（TUI pick-list，不耗 token；能枚舉的設定一律用選的，打字只出現在「自訂…」或沒有候選時；寫入 config.json 並附時間戳備份） |
 | `/compass on` \| `/compass off` | 主開關（session-only） |
 | `/compass mode auto\|confirm\|notify` | 切換模式（session-only） |
 | `/compass budget daily <n>` | session-only 日上限（`monthly` 為月上限） |
@@ -56,6 +56,19 @@ npm install
 npm run typecheck
 npm test
 ```
+
+### 更新模型事實（能力分數清單）
+
+`extensions/pi-compass-router/model-facts.json` 是 L1 事實層的唯一來源：
+**價格**由 `npm run refresh-facts` 自動同步（OpenRouter API 優先、pi
+model catalogue 兜底），**能力分數**永不自動猜，改用榜單人工核對（附出處）。
+建議定期跑，例（每週一 06:00 寫進 `crontab -e`）：
+
+```cron
+0 6 * * 1 cd /path/to/pi-compass && npm run refresh-facts >> /tmp/pi-compass-refresh-facts.log 2>&1
+```
+
+超過 14 天未更新時，`/compass-set → ⑥ 看鏈的來源` 會標警示。
 
 ## License
 

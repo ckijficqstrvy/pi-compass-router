@@ -6,7 +6,7 @@ import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-a
 import { Text } from "@earendil-works/pi-tui";
 import { Type } from "typebox";
 
-import { loadConfig, validatePatch, writeConfigPatch, CONFIG_FILE } from "./config/load.js";
+import { loadConfig, validatePatch, writeConfigPatch } from "./config/load.js";
 import { loadSpend } from "./budget.js";
 import { compose } from "./route/compose.js";
 import { selectTargets, menuKeys, targetKey } from "./route/select.js";
@@ -14,10 +14,12 @@ import { guard, type GuardState } from "./route/guard.js";
 import { applyRoute, type ApplyHooks } from "./route/apply.js";
 import { createLayaClassifier } from "./classify/laya.js";
 import { createCloudClassifier } from "./classify/cloud.js";
+import { reloadClassifier } from "./classify/lifecycle.js";
 import type { Classifier, Judgment } from "./classify/types.js";
 import { renderEntry, type RouteEntry } from "./ui/entries.js";
 import { suggest } from "./suggest.js";
-import { runSettingsWizard, type WizardHooks } from "./ui/wizard.js";
+import { runSettingsWizard, type CandidateKind, type WizardHooks } from "./ui/wizard.js";
+import { cloudClassifierKeys, localCheckpoints, openRouterModelKeys } from "./ui/sources.js";
 import type { CompassConfig, Mode, Target, ThinkingLevel, Tier } from "./schema.js";
 
 /** session 生命週期持有的資源（`session_start` 開、`session_shutdown` 收）。 */
@@ -135,7 +137,7 @@ async function routeTurn(
   );
 
   // Stage 5 — apply（hooks 接 pi / ctx）。
-  const hooks = buildHooks(pi, ctx, state);
+  const hooks = buildHooks(pi, ctx);
   const outcome = await applyRoute(
     {
       outcome: result.outcome,
@@ -172,7 +174,7 @@ async function routeTurn(
 }
 
 /** Stage 5 hooks：接 pi 的 setModel/setThinkingLevel + ctx 的 entry 寫入。 */
-function buildHooks(pi: ExtensionAPI, ctx: ExtensionContext, state: SessionState): ApplyHooks {
+function buildHooks(pi: ExtensionAPI, ctx: ExtensionContext): ApplyHooks {
   return {
     async setModel(key: string): Promise<void> {
       const slash = key.indexOf("/");
@@ -200,17 +202,21 @@ function writeEntry(pi: ExtensionAPI, entry: RouteEntry): void {
   pi.appendEntry("compass", entry);
 }
 
-/** 載入設定並（re）建立 classifier。 */
-function reloadConfig(state: SessionState): void {
+/**
+ * 載入設定，並依**分類器輸入是否變動**決定要不要重建分類器
+ *（`classify/lifecycle.ts`）。回載入後的設定（`/compass-set` 重繪用）。
+ *
+ * 輸入沒變就保留既有分類器（含暖好的 laya 子行程）——不然改個預算都會
+ * 把已載好的模型殺掉；重建時一律立刻 `warm()`（與 session 啟動同一行為）。
+ */
+function reloadConfig(state: SessionState): CompassConfig {
   const result = loadConfig();
-  state.config = result.config;
-  state.classifier?.dispose?.();
-  state.classifier = undefined;
-  if (state.config.classify.provider === "laya") {
-    state.classifier = createLayaClassifier(state.config);
-  } else if (state.config.classify.provider === "cloud") {
-    state.classifier = createCloudClassifier(state.config);
-  }
+  reloadClassifier(state, result.config, (config) => {
+    if (config.classify.provider === "laya") return createLayaClassifier(config);
+    if (config.classify.provider === "cloud") return createCloudClassifier(config);
+    return undefined; // 未知後端：不建分類器（路由走 tier 預設，fail-open）
+  });
+  return state.config;
 }
 /**
  * pi 擴充入口。pi 要求 **`export default` 工廠**（實測：命名匯出 `register()`
@@ -220,10 +226,10 @@ function reloadConfig(state: SessionState): void {
 export default function compass(pi: ExtensionAPI): void {
   const state = createState();
 
-  // session lifecycle：載入設定 + 預熱 laya；關閉時拆除。
+  // session lifecycle：載入設定 + 預熱 laya（由 reloadConfig 重建時預熱，
+  // 輸入沒變則沿用既有的暖子行程）；關閉時拆除。
   pi.on("session_start", () => {
     reloadConfig(state);
-    state.classifier?.warm?.();
   });
   pi.on("session_shutdown", () => {
     state.classifier?.dispose?.();
@@ -253,7 +259,7 @@ function registerCommands(pi: ExtensionAPI, state: SessionState): void {
       const [sub, ...rest] = args.trim().split(/\s+/);
       switch (sub) {
         case undefined:
-          return showStatus(pi, ctx, state);
+          return showStatus(ctx, state);
         case "on":
           state.config.enabled = true;
           return ctx.ui.notify("compass on (session)", "info");
@@ -276,7 +282,7 @@ function registerCommands(pi: ExtensionAPI, state: SessionState): void {
           return ctx.ui.notify(`${dim} ${value === null ? "cleared" : `$${value}`}`, "info");
         }
         case "why":
-          return showStatus(pi, ctx, state, true);
+          return showStatus(ctx, state, true);
         case "revert":
           return ctx.ui.notify(state.previousModel ? `revert → ${state.previousModel}` : "nothing to revert", "info");
         case "suggest":
@@ -292,9 +298,46 @@ function registerCommands(pi: ExtensionAPI, state: SessionState): void {
     handler: async (_args, ctx) => {
       const hooks: WizardHooks = {
         write: (key, value) => writeConfigPatch({ [key]: value }),
+        // 回傳新設定物件：reload 會換掉 session 的設定，選單要改畫新物件。
         reload: () => reloadConfig(state),
         prompt: async (label, initial) => (await ctx.ui.input(label, initial)) ?? null,
         pick: async (label, options) => (await ctx.ui.select(label, options)) ?? null,
+        notify: (message, type) => ctx.ui.notify(message, type ?? "info"),
+        // 測試分類器：跑一輪真分類（不切換），回一列結果供「重設・診斷」顯示。
+        probeClassifier: async () => {
+          const classifier = state.classifier;
+          if (!classifier) return "沒有分類器（backend 未啟用）";
+          const started = Date.now();
+          try {
+            const judgment = await classifier.classify(
+              { request: "回一個字就好", kinds: kindsOf(state.config) },
+              AbortSignal.timeout(8000),
+            );
+            const ms = Date.now() - started;
+            return `${classifier.id} ${ms}ms · kind ${judgment.kind} ${Math.round(judgment.kindConfidence * 100)}% · cache ${judgment.cacheHit ? "hit" : "miss"}`;
+          } catch (error) {
+            return `分類失敗：${error instanceof Error ? error.message : String(error)}`;
+          }
+        },
+        // 候選來源（選單純資料，I/O 全在這裡）：失敗一律回空 → 該項退回打字。
+        candidates: async (kind: CandidateKind): Promise<string[]> => {
+          try {
+            if (kind === "checkpoint") return localCheckpoints();
+            if (kind === "classifier") {
+              // cloud 端點只吃 typesafe；registry 其餘分類模型掛在 openrouter
+              // 等 provider 下，選了會讓分類直接失效（見 sources.ts 說明）。
+              return cloudClassifierKeys(ctx.modelRegistry.getModelsOfType("classifier"));
+            }
+            // registry（pi 的 models-store）∪ OpenRouter 最新清單（API）：
+            // store 可能落後上架的新模型，線上清單補上（內部 24h 快取、
+            // 斷線 fail-safe 回空）。
+            const registryKeys = ctx.modelRegistry.getAvailable().map((model) => `${model.provider}/${model.id}`);
+            const liveKeys = await openRouterModelKeys();
+            return [...registryKeys, ...liveKeys];
+          } catch {
+            return [];
+          }
+        },
       };
       await runSettingsWizard(state.config, hooks);
     },
@@ -313,7 +356,7 @@ function registerCommands(pi: ExtensionAPI, state: SessionState): void {
 }
 
 /** 顯示狀態（Part 10.3 / 10.1 `/compass`）。 */
-async function showStatus(pi: ExtensionAPI, ctx: ExtensionContext, state: SessionState, why = false): Promise<void> {
+async function showStatus(ctx: ExtensionContext, state: SessionState, why = false): Promise<void> {
   const spend = loadSpend();
   const pressure = Math.max(
     state.config.budget.dailyUsd ? spend.todayUsd / state.config.budget.dailyUsd : 0,
@@ -347,7 +390,7 @@ function registerTools(pi: ExtensionAPI, state: SessionState): void {
     label: "compass route",
     description: "Classify arbitrary text and show the recommended tier + model (does not switch).",
     parameters: Type.Object({ text: Type.String({ description: "Text to classify" }) }),
-    async execute(_id, params) {
+    async execute(_id, _params) {
       const composed = compose(undefined, state.config);
       const selected = selectTargets(composed.tier, undefined, state.config);
       const target = selected.picked ?? selected.chain[0];

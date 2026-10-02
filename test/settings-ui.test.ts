@@ -1,7 +1,7 @@
 // test/settings-ui.test.ts — 標籤往返、驗證、寫入備份（SPEC Part 12）。
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -10,6 +10,8 @@ import {
   modeLabel,
   parseAmount,
   parseChain,
+  profileFromLabel,
+  profileLabel,
   providerFromLabel,
   providerLabel,
   runSettingsWizard,
@@ -71,6 +73,16 @@ test("providerLabel and providerFromLabel round-trip", () => {
 
 test("providerLabel passes through an unregistered provider verbatim", () => {
   assert.equal(providerLabel("my-custom"), "my-custom");
+});
+
+test("profileLabel and profileFromLabel round-trip, ceilings printed in the label", () => {
+  for (const profile of ["cheap", "balanced", "quality"] as Profile[]) {
+    const label = profileLabel(profile);
+    assert.equal(profileFromLabel(label), profile, `${profile} round-trip`);
+    assert.match(label, /\/M 上限：/, "每層天花板要印在標籤上");
+    assert.match(label, /quick \$\d/, label);
+  }
+  assert.equal(profileFromLabel("nonsense"), null);
 });
 
 // ---------------------------------------------------------------------------
@@ -201,9 +213,10 @@ test("runSettingsWizard writes a picked mode, reloads, and quits on Esc", async 
     },
     async pick(_label, options) {
       picks += 1;
-      if (picks === 1) return options.find((row) => row.startsWith("路由模式")) ?? null;
-      if (picks === 2) return "confirm — 每次切換前先問你";
-      return null; // Esc
+      if (picks === 1) return options.find((row) => row.startsWith("① 路由行為")) ?? null; // 主選單 → 組
+      if (picks === 2) return options.find((row) => row.startsWith("路由模式")) ?? null; // 組內 → 項目
+      if (picks === 3) return "confirm — 每次切換前先問你"; // 選值
+      return null; // Esc（組內 → 主選單）
     },
   };
 
@@ -232,8 +245,9 @@ test("runSettingsWizard skips reload when a write is rejected", async () => {
     },
     async pick(_label, options) {
       picks += 1;
-      if (picks === 1) return options.find((row) => row.startsWith("路由模式")) ?? null;
-      if (picks === 2) return "auto — 自動切換";
+      if (picks === 1) return options.find((row) => row.startsWith("① 路由行為")) ?? null;
+      if (picks === 2) return options.find((row) => row.startsWith("路由模式")) ?? null;
+      if (picks === 3) return "auto — 自動切換";
       return null;
     },
   };

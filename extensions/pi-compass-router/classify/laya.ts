@@ -8,7 +8,7 @@ import { existsSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { buildQuestions, ClassifyError, parseAnalysis } from "./analysis.js";
-import { cacheKey, ClassificationCache, configGeneration, normalizeRequest } from "./cache.js";
+import { cacheKey, ClassificationCache, configGeneration } from "./cache.js";
 import type { ClassifyInput, Classifier, Judgment } from "./types.js";
 import type { CompassConfig } from "../schema.js";
 

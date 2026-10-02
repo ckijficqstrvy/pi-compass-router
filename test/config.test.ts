@@ -5,6 +5,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 import { CONFIG_FILE, loadConfig, validatePatch, WRITABLE_KEYS } from "../extensions/pi-compass-router/config/load.js";
+import { factFor } from "../extensions/pi-compass-router/policy/facts.js";
 import { blendedOf, factsValid, rankedFacts, sliceBands } from "../extensions/pi-compass-router/policy/facts.js";
 import { COMPASS_ENV_MAP, parseEnvOverrides } from "../extensions/pi-compass-router/config/env.js";
 
@@ -297,8 +298,13 @@ test("autoRoutes derives tier chains from the facts file", () => {
   assert.ok(config.routes.quick.length > 0, "quick band must be derived");
   assert.ok(config.routes.standard.length > 0);
   assert.ok(config.routes.premium.length > 0);
-  // 快帶第一位應是能力最高的平價模型（glm-flash，cap 42，blended 0.52）。
-  assert.match(config.routes.quick[0].model, /glm-flash/);
+  // 結構不變量（不綁死特定模型——事實檔/價格會隨 refresh-facts 變動）：
+  // 派生鏈全部來自事實檔，且能力降序（帶頭 = 該帶能力最高的模型）。
+  for (const target of config.routes.quick) {
+    assert.ok(factFor(target.provider, target.model), `${target.model} must come from the facts file`);
+  }
+  const capabilities = config.routes.quick.map((t) => factFor(t.provider, t.model)?.capability ?? -1);
+  assert.deepEqual(capabilities, [...capabilities].sort((a, b) => b - a), "derived chain is capability-descending");
 });
 
 test("a tier written in config.json is not overwritten by derivation (L3 wins)", () => {

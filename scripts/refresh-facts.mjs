@@ -4,8 +4,9 @@
  * pi 的即時 model catalogue 對齊。
  *
  * 自動化的部分（永遠不要手改）：
- *   · `price` — 從 catalogue 讀（`cost.input` / `cost.output`，USD / 百萬 token），
- *     使價格跟著 `pi update --models` 走，而不是有人抄數字。
+ *   · `price` — **OpenRouter 公開 API 優先**（`GET /api/v1/models` 的
+ *     `pricing.prompt/completion`，USD/token → USD/M），抓不到退回 pi 的
+ *     model catalogue（`cost.input` / `cost.output`），讓價格即時且不靠人抄。
  *   · 生命週期 — slug 已從 catalogue 消失的事實會被報告，catalogue 裡
  *     尚未進入 facts 的模型會列成候選。
  *
@@ -51,6 +52,27 @@ const readJson = (file) => {
 const catalog = readJson(catalogFile);
 const facts = readJson(factsFile);
 
+// 價格來源 1：OpenRouter 公開 API（免金鑰）。失敗 → 空 map，落回 catalogue。
+const OPENROUTER_MODELS_URL = "https://openrouter.ai/api/v1/models";
+const apiPrices = new Map();
+let apiSource = "OpenRouter API";
+/** USD/M 取到小數 6 位（per-token 價格 ×1e6 會有浮點雜訊）。 */
+const round6 = (n) => Math.round(n * 1e6) / 1e6;
+try {
+  const response = await fetch(OPENROUTER_MODELS_URL, { signal: AbortSignal.timeout(15_000) });
+  if (!response.ok) throw new Error(`HTTP ${response.status}`);
+  const payload = await response.json();
+  for (const entry of payload?.data ?? []) {
+    if (typeof entry?.id !== "string" || entry.id.includes(":batch")) continue;
+    const input = round6(Number(entry?.pricing?.prompt) * 1e6);
+    const output = round6(Number(entry?.pricing?.completion) * 1e6);
+    if (!Number.isFinite(input) || !Number.isFinite(output)) continue;
+    apiPrices.set(`openrouter/${entry.id}`, { input, output });
+  }
+} catch (error) {
+  apiSource = `pi catalogue（OpenRouter API 連線失敗：${String(error).slice(0, 60)}）`;
+}
+
 /** 攤平目錄：`{ providerKey: { models: [...] } }` → 查找表。 */
 const byProviderModel = new Map();
 const byId = new Map();
@@ -77,22 +99,28 @@ const priced = [];
 const kept = [];
 const missing = [];
 const estimated = [];
+let apiUsed = 0;
+let catalogUsed = 0;
 
 for (const fact of facts.models ?? []) {
-  const match = byProviderModel.get(`${fact.provider}/${fact.model}`) ?? byId.get(fact.model);
-  if (!match?.cost) {
-    missing.push(`${fact.provider}/${fact.model}`);
-    if (fact.estimated) estimated.push(`${fact.provider}/${fact.model}`);
+  const key = `${fact.provider}/${fact.model}`;
+  const match = byProviderModel.get(key) ?? byId.get(fact.model);
+  const fromApi = apiPrices.get(key);
+  const next = fromApi ?? (match?.cost ? { input: match.cost.input, output: match.cost.output } : undefined);
+  if (!next) {
+    missing.push(key);
+    if (fact.estimated) estimated.push(key);
     continue;
   }
-  const next = { input: match.cost.input, output: match.cost.output };
+  if (fromApi) apiUsed += 1;
+  else catalogUsed += 1;
   if (!samePrice(fact.price, next)) {
-    priced.push(`${fact.provider}/${fact.model}: ${priceText(fact.price)} -> ${priceText(next)}`);
+    priced.push(`${key}: ${priceText(fact.price)} -> ${priceText(next)}`);
     fact.price = next;
   } else {
-    kept.push(`${fact.provider}/${fact.model}`);
+    kept.push(key);
   }
-  if (fact.estimated) estimated.push(`${fact.provider}/${fact.model}`);
+  if (fact.estimated) estimated.push(key);
 }
 
 // 候選：catalogue 裡定價合理、但 facts 還沒描述的模型。
@@ -111,7 +139,7 @@ const candidates = [...byId.values()]
 facts.generatedAt = new Date().toISOString().slice(0, 10);
 facts.source =
   `capability: manual scores (AA intelligence index / Terminal-Bench cross-check), never auto-guessed; ` +
-  `prices auto-synced from pi's model catalogue by \`npm run refresh-facts\` on ${facts.generatedAt}.`;
+  `prices auto-synced by \`npm run refresh-facts\` from OpenRouter API (fallback: pi model catalogue) on ${facts.generatedAt}.`;
 
 if (!dryRun) {
   writeFileSync(factsFile, `${JSON.stringify(facts, null, 2)}\n`, "utf8");
@@ -119,6 +147,7 @@ if (!dryRun) {
 
 console.log(`${dryRun ? "[dry run] " : ""}refreshed ${factsFile}`);
 console.log(`catalogue: ${catalogFile} (${byId.size} models, ${byProviderModel.size} provider-scoped ids)`);
+console.log(`price source: ${apiSource}（API ${apiUsed} 筆 / catalogue ${catalogUsed} 筆）`);
 console.log(`\nprices updated (${priced.length}):`);
 for (const line of priced) console.log(`  ${line}`);
 if (priced.length === 0) console.log("  (already current)");
