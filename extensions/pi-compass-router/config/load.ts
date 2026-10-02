@@ -1,7 +1,7 @@
 // config/load.ts — 三層設定解析、warnings、env 驗證（SPEC Part 3.2 / 3.4）。
-import { readFileSync } from "node:fs";
+import { copyFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
-import { join } from "node:path";
+import { basename, dirname, join } from "node:path";
 import { COMPASS_ENV_MAP, parseEnvOverrides, type EnvPatch } from "./env.js";
 import { MODEL_FACTS, factsValid, rankedFacts, sliceBands } from "../policy/facts.js";
 import { ceilingFor, filterChain, insertPrefer } from "../policy/filter.js";
@@ -724,6 +724,66 @@ export function validatePatch(key: string, value: unknown): string | null {
   if (!check) return `${key}: unknown setting (not in the whitelist)`;
   const problem = check(value);
   return problem ? `${key}: ${problem}` : null;
+}
+
+/**
+ * 驗證並把 patch 合入 config.json（Part 3.4 三條規則的落檔實作）。
+ *
+ * - **白名單 + 寫前驗證**：逐鍵跑 `validatePatch`，任一不過 → 回第一個
+ *   `key: reason`、**一個字都不寫**（原子：不能半寫）。
+ * - **Patch 非覆寫**：只把指定鍵合入現檔，其餘鍵原樣保留（合併由現有
+ *   `applyFilePatch` 負責，與載入路徑同一份邏輯，不會漂移）。
+ * - **時間戳備份**：落檔前把現有檔複製為 `<name>.bak-<ISO 去冒號>`（同目錄）；
+ *   備份失敗**不阻擋寫入**（備份是安全網不是鎖）。
+ *
+ * 回 `null` 表成功。
+ *
+ * @param filePath **僅供測試**注入路徑；預設與生產一律 `CONFIG_FILE`。
+ */
+export function writeConfigPatch(
+  patch: Record<string, unknown>,
+  filePath: string = CONFIG_FILE,
+): string | null {
+  // 1. 全部驗證通過才動檔（原子）。
+  for (const [key, value] of Object.entries(patch)) {
+    const problem = validatePatch(key, value);
+    if (problem) return problem;
+  }
+
+  // 2. 讀現檔（不存在 = 空物件，不是錯誤）。
+  const current = readJsonFile(filePath).patch ?? {};
+  const warnings: string[] = [];
+  const next = applyFilePatch({ ...DEFAULT_CONFIG } as CompassConfig, current, warnings);
+  const merged = applyFilePatch(next, patch, warnings);
+
+  // 3. 時間戳備份（同目錄；失敗不阻擋）。
+  if (existsSync(filePath)) {
+    try {
+      const stamp = new Date().toISOString().replace(/[:.]/g, "-");
+      copyFileSync(filePath, `${filePath}.bak-${stamp}`);
+    } catch {
+      // 備份失敗不阻擋寫入（安全網不是鎖）。
+    }
+  }
+
+  // 4. 寫回（只有白名單鍵在 patch 裡，其餘來自現檔 + 預設的合併結果）。
+  try {
+    mkdirSync(dirname(filePath), { recursive: true });
+    const serializable = pickWritableKeys(merged);
+    writeFileSync(filePath, `${JSON.stringify(serializable, null, 2)}\n`, { mode: 0o600 });
+  } catch (error) {
+    return `${basename(filePath)}: write failed (${(error instanceof Error ? error.message : String(error)).slice(0, 120)})`;
+  }
+  return null;
+}
+
+/** 只挑白名單鍵序列化（Patch 非覆寫：衍生/預設值不寫回使用者檔案）。 */
+function pickWritableKeys(config: CompassConfig): Record<string, unknown> {
+  const out: Record<string, unknown> = {};
+  for (const key of WRITABLE_KEYS) {
+    out[key] = (config as unknown as Record<string, unknown>)[key];
+  }
+  return out;
 }
 
 /** 供文件與工具提示列出可寫鍵（Part 3.4）。 */

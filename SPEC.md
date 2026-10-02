@@ -838,6 +838,63 @@ pressure = max(today÷dailyUsd, month÷monthlyUsd)
 `providerFromLabel()`、`modeLabel()`、`modeFromLabel()`、
 `runSettingsWizard(hooks)`。
 
+#### hooks 形狀與寫入路徑（2026-10-01 補，寫 `wizard.ts` 前定）
+
+原規格只給了 `runSettingsWizard(hooks)` 簽名，**沒定義 hooks 長什麼樣**
+（骨架自己標了「規格未定義 hook 形狀」）。本節定案：
+
+```ts
+interface WizardHooks {
+  /** 逐項寫入驗證與落地。key/value 同 `compass_config` 工具（Part 3.4 白名單）。
+   *  實作即 `validatePatch(key, value)` 通過後合入 config.json。
+   *  回 `null` 成功，回 `key: reason` 表示拒絕（選單不重繪、不落檔）。 */
+  write(key: string, value: unknown): string | null;
+  /** 寫入後重載進執行中 session（Part 10.2：重載 → 才重繪）。 */
+  reload(): void | Promise<void>;
+  /** TUI 取一列輸入（選金額、選鏈字串）。回 `null` = 使用者取消（Esc）。 */
+  prompt(label: string, initial?: string): Promise<string | null>;
+  /** TUI 從清單選一項（選 mode、profile）。回 `null` = 取消。 */
+  pick(label: string, options: string[]): Promise<string | null>;
+}
+```
+
+**寫入備份**（Part 10.2「時間戳備份落在同目錄」）：`write()` 實作（在
+`config/load.ts` 補的 `writeConfigPatch()`）負責——落檔前先把現有
+`config.json` 複製為 `config.json.bak-<ISO 8601 去冒號>`（同目錄）。
+備份失敗**不阻擋寫入**（備份是安全網不是鎖），但寫入失敗要回 `key: reason`。
+
+**helper 語意（白名單——沿用原創 `settings-ui.ts`，不重新發明）**：
+
+| helper | 行為 |
+| --- | --- |
+| `parseChain(s)` | `"provider/model, provider/model"` → `Target[]`（逗號分隔、去空白、跳過空段；無 `/` → provider 為 `""`）。往返於 `routes` 顯示字串。 |
+| `parseAmount(s)` | `"$5.00"`／`"5"`／`"5.5"` → `number`；負數、`NaN`、`非數字` → `null`。金額驗證。 |
+| `providerLabel(p)` | `"openrouter"` → `"OpenRouter"`；未登記 → 原樣回傳（不丟失 provider 名）。 |
+| `providerFromLabel(l)` | `"OpenRouter"` → `"openrouter"`（不分大小寫）；未登記 → `null`。 |
+| `modeLabel(m)` | `auto`→`"auto — 自動切換"`、`confirm`→`"confirm — 每次切換前先問你"`、`notify`→`"notify — 只提醒不切換"`。 |
+| `modeFromLabel(l)` | 取前綴 token（`auto`/`confirm`/`notify`，不分大小寫）→ `Mode`；否則 `null`。 |
+| `runSettingsWizard(hooks)` | 逐項選/驗證/寫/重載/重繪（見 Part 10.2 選單清單）。 |
+
+`providerLabel` 與 `modeLabel` 必須**往返一致**（`modeFromLabel(modeLabel(m)) === m`、
+`providerFromLabel(providerLabel(p)) === p`）——`settings-ui.test.ts` 對此覆寫。
+
+#### 寫入實作 `writeConfigPatch()`（補進 `config/load.ts`）
+
+Part 3.4 只定義了 `validatePatch`（驗證），**沒有落檔函式**——wizard 與
+`compass_config` 工具都需要它。新增：
+
+```ts
+/**
+ * 驗證並把 patch 合入 config.json（Patch 非覆寫：只改指定鍵）。
+ * 回 `null` 成功；回 `key: reason` 拒絕（不落檔）。
+ * 落檔前寫時間戳備份（同目錄，備份失敗不阻擋）。
+ */
+export function writeConfigPatch(patch: Record<string, unknown>, filePath = CONFIG_FILE): string | null
+```
+
+行為：逐鍵 `validatePatch` → 全過才讀現檔、合入、寫回；任一不過 → 回第一個
+`key: reason`、**一個字都不寫**（原子：不能半寫）。
+
 ### 10.3 狀態列
 
 `compass:standard · $0.42 · 74% · notify`（mode 非 auto 才顯示 mode）
@@ -923,7 +980,7 @@ pi-compass/
 | `thinking.test.ts` | 你的（全新） | 四層 thinking 解析、clamp readback、pin 優先 |
 | `model-pick.test.ts` | 你的（全新） | menu gate：registry／deny／rated／capability／價格帶 |
 | `laya.test.ts` | 你的（全新） | bridge 規約、崩潰重啟、fail-open |
-| `settings-ui.test.ts` | 你的（全新） | 標籤往返、驗證、寫入備份 |
+| `settings-ui.test.ts` | 你的（全新） | 標籤往返、驗證、寫入備份（→ 實作於 `test/settings-ui.test.ts`：`ui/wizard.ts` 的 label round-trip 與 `config/load.ts` 的 `writeConfigPatch` 備份） |
 | `latency.ts` | 你的（全新） | 分類延遲量測 |
 | `pipeline.test.ts` | **新增** | Stage 1–5 各自的純函式 |
 | `analysis.test.ts` | **新增**（2026-10-01 補） | 問題集建構、laya 回應解析、score→0–3 正規化、非法種類拒絕、`sanitizeRemote` 上限 |
