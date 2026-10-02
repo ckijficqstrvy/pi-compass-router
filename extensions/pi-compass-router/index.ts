@@ -13,6 +13,7 @@ import { selectTargets, menuKeys, targetKey } from "./route/select.js";
 import { guard, type GuardState } from "./route/guard.js";
 import { applyRoute, type ApplyHooks } from "./route/apply.js";
 import { createLayaClassifier } from "./classify/laya.js";
+import { createCloudClassifier } from "./classify/cloud.js";
 import type { Classifier, Judgment } from "./classify/types.js";
 import { renderEntry, type RouteEntry } from "./ui/entries.js";
 import { suggest } from "./suggest.js";
@@ -74,11 +75,6 @@ async function routeTurn(
 
   // Stage 1 — classify（menu 組 key 與 select 一致）。
   let judgment: Judgment | undefined;
-  if (config.classify.provider === "cloud") {
-    // cloud.ts 阻塞（Part 4.3）：fail-open 並在 entry 明說不可用，不 spawn。
-    writeEntry(pi, { symbol: "×", tier: null, target: null, reason: "cloud backend unavailable (wire format unverified)" });
-    return;
-  }
   if (state.classifier) {
     try {
       const menu = menuKeys(compose(undefined, config).tier, undefined, config);
@@ -212,6 +208,8 @@ function reloadConfig(state: SessionState): void {
   state.classifier = undefined;
   if (state.config.classify.provider === "laya") {
     state.classifier = createLayaClassifier(state.config);
+  } else if (state.config.classify.provider === "cloud") {
+    state.classifier = createCloudClassifier(state.config);
   }
 }
 /**

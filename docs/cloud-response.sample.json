@@ -1,0 +1,71 @@
+{
+  "_note": "Captured 2026-10-02 from POST https://api.typesafe.ai/v1/systemone (jev-latest). Redacted: no auth header stored. Request used choice criteria as OBJECT MAP (array rejected with 422).",
+  "status": 200,
+  "response": {
+    "model": "jev-1.13.0",
+    "answers": {
+      "task_kind": {
+        "type": "choice",
+        "choice": "implement",
+        "confidence": 0.99,
+        "probabilities": {
+          "plan": 0.0,
+          "implement": 1.0,
+          "chat": 0.0
+        }
+      },
+      "complexity": {
+        "type": "score",
+        "score": 2.25,
+        "confidence": 0.69,
+        "legend": {
+          "0": "trivial",
+          "1": "simple",
+          "2": "moderate",
+          "3": "architectural"
+        },
+        "probabilities": {
+          "0": 0.0,
+          "1": 0.03,
+          "2": 0.69,
+          "3": 0.28
+        }
+      },
+      "capability_deserved": {
+        "type": "score",
+        "score": 1.19,
+        "confidence": 0.55,
+        "legend": {
+          "0": "minimal",
+          "1": "standard",
+          "2": "high",
+          "3": "maximum"
+        },
+        "probabilities": {
+          "0": 0.13,
+          "1": 0.57,
+          "2": 0.28,
+          "3": 0.02
+        }
+      },
+      "needs_deep_reasoning": {
+        "type": "noul",
+        "noul": 0.56
+      },
+      "thinking_level": {
+        "type": "choice",
+        "choice": "high",
+        "confidence": 0.67,
+        "probabilities": {
+          "off": 0.01,
+          "high": 0.78,
+          "low": 0.21
+        }
+      }
+    },
+    "usage": {
+      "input_tokens": 497,
+      "output_tokens": 129
+    }
+  }
+}

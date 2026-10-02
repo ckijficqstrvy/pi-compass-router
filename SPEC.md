@@ -416,7 +416,11 @@ Judgment     { kind, kindConfidence, complexity, capability,
   （typesafe 之外可接 openrouter、vercel AI 等），
   **由 `classify.cloud.provider` 決定**，介面不變。
 
-#### ⚠️ 線格式未驗證（阻塞 `cloud.ts` 實作）
+#### 線格式已驗證 — `cloud.ts` 可實作（2026-10-02 解除）
+
+> **原狀態**：線格式未驗證，阻塞 `cloud.ts`。
+> **解除**：2026-10-02 讀了官方 OpenAPI spec 並實抓兩次（array → 422、
+> map → 200），schema 已回填於下方「已驗證線格式」，`cloud.ts` 開始實作。
 
 `parseAnalysis()` 的解析已依 **laya-mlx 官方源碼**驗證（見 `classify/analysis.ts`
 檔頭），但 **cloud 後端的回應 schema 從未驗證**——舊版實作位於禁讀的
@@ -435,7 +439,36 @@ fail-open（不崩，但也不路由）。
 5. 未完成以上任一步前，不實作 `cloud.ts`，`provider: "cloud"` 保持
    不可用並在狀態列明說。
 
-**已驗證線格式**：（待第 3 步回填）
+**已驗證線格式**：（2026-10-02 回填，解除阻塞）
+
+**驗證方式（Part 4.3 解除步驟 1+2 都執行了）**：
+
+1. 讀了官方 OpenAPI 3.1.0 spec：`https://api.typesafe.ai/openapi.json`。
+2. 以 `~/.pi/agent/pi-typesafe/auth.json` 的金鑰**實抓兩次**：
+   - choice `criteria` 傳 **array** → **HTTP 422**
+     `Input should be a valid dictionary`；
+   - choice `criteria` 傳 **object map** → **200 OK**。
+   完整回應存於 `docs/cloud-response.sample.json`（無金鑰、無 header）。
+
+**結論**：回應是 **`{model, answers, usage}`**（三者皆 required）——就是
+`analysis.ts` 的 `pickAnswers()` 已接受的 `{answers: {...}}` 形狀，
+**沒有第三種形狀**，故解除步驟 4（加新解析）**不適用**。answer 形狀：
+
+| type | 回應欄位 | `parseAnalysis` 對應 |
+| --- | --- | --- |
+| `choice` | `{type, choice, confidence, probabilities}` | `choiceOf` → `kind`/`thinking`/`modelPick` |
+| `score` | `{type, score, confidence, legend, probabilities}` | `scoreToThree`（讀 `legend` 算 k） |
+| `noul` | `{type, noul}` | `noulOf` |
+
+**⚠️ 一處與 laya 的實質差異（寫 cloud 前發現）**：typesafe 的
+`ChoiceQuestion.criteria` 規格是 **object map**（`{label: description}`），
+**array 會 422**；而 laya 的 `_to_internal` 兩者都收（choice 可 list 或 dict）。
+`buildQuestions()` 目前對 choice 傳 `string[]`——**laya OK，typesafe 422**。
+
+**定案**：`buildQuestions()` 維持傳 `string[]`（單一形狀、laya 與快取鍵穩定），
+由 `classify/cloud.ts` 在**送出前**把 choice 的 `criteria` array → map
+（`Object.fromEntries(criteria.map(c => [c, c]))`，無描述就以標籤自身為值）。
+這樣 laya 路徑不變、快取鍵不分岔、typesafe 只在自己的 client 做轉換。
 
 ### 4.4 安全
 
