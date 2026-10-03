@@ -17,8 +17,16 @@ export interface SpendSnapshot {
 /**
  * 唯一的記帳路徑（Part 8：固定所有權，不可配置，不是設定鍵）。
  * 與 `~/.pi/agent/pi-compass/config.json` 同目錄。
+ *
+ * **呼叫時解析**（不是模組載入時）——`homedir()` 會跟著行程環境變動，
+ * 測試注入 temp HOME 才不會被模組快取釘死。
  */
-export const STATE_FILE = join(homedir(), ".pi", "agent", "pi-compass", "state.json");
+export function stateFile(): string {
+  return join(homedir(), ".pi", "agent", "pi-compass", "state.json");
+}
+
+/** @deprecated 相容用；新程式碼請用 `stateFile()`（呼叫時解析）。 */
+export const STATE_FILE = stateFile();
 
 /** state.json 的內部形狀。以 UTC 日／月為滾動窗（Part 8）。 */
 interface LedgerFile {
@@ -128,7 +136,8 @@ function releaseLock(stateFile: string): void {
  * @param stateFile **僅供測試**注入路徑；預設與生產一律 `STATE_FILE`
  *   （不可配置，Part 8）。
  */
-export function loadSpend(at: Date = new Date(), stateFile: string = STATE_FILE): SpendSnapshot {
+export function loadSpend(at: Date = new Date(), file: string = stateFile()): SpendSnapshot {
+  const stateFile = file;
   const ledger = readLedger(at, stateFile);
   return { todayUsd: ledger.todayUsd, monthUsd: ledger.monthUsd };
 }
@@ -158,7 +167,8 @@ export function computePressure(spend: SpendSnapshot, config: CompassConfig): nu
  * - **永不 throw**
  * - `stateFile` **僅供測試**注入；生產與預設一律 `STATE_FILE`
  */
-export function recordSpend(amountUsd: number, at: Date = new Date(), stateFile: string = STATE_FILE): void {
+export function recordSpend(amountUsd: number, at: Date = new Date(), file: string = stateFile()): void {
+  const stateFile = file;
   if (!Number.isFinite(amountUsd) || amountUsd <= 0) return;
   // 讀-改-寫要互斥，否則兩個 pi session 同時記帳會掉更新。
   // 拿不到鎖（別的行程持有且未過期）→ 仍寫（best-effort，最後寫者勝）；

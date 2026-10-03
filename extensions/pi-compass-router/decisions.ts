@@ -10,8 +10,13 @@ import { appendFileSync, mkdirSync, readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 
-/** 唯一的日誌路徑（與 config/state 同目錄；不可配置）。 */
-export const DECISIONS_FILE = join(homedir(), ".pi", "agent", "pi-compass", "decisions.jsonl");
+/** 唯一的日誌路徑（與 config/state 同目錄；不可配置）。**呼叫時解析**。 */
+export function decisionsFile(): string {
+  return join(homedir(), ".pi", "agent", "pi-compass", "decisions.jsonl");
+}
+
+/** @deprecated 相容用；新程式碼請用 `decisionsFile()`。 */
+export const DECISIONS_FILE = decisionsFile();
 
 /** 一條路由決策（不含 prompt 內容）。 */
 export interface RouteDecisionRecord {
@@ -41,7 +46,7 @@ export interface FeedbackRecord {
 export type DecisionRecord = RouteDecisionRecord | FeedbackRecord;
 
 /** 測試可注入路徑。回傳實際寫入的檔案（成功時）或 undefined（失敗吞掉）。 */
-export function appendDecision(record: DecisionRecord, file: string = DECISIONS_FILE): void {
+export function appendDecision(record: DecisionRecord, file: string = decisionsFile()): void {
   try {
     mkdirSync(dirname(file), { recursive: true });
     appendFileSync(file, `${JSON.stringify({ ts: new Date().toISOString(), ...record })}\n`, { mode: 0o600 });
@@ -51,7 +56,7 @@ export function appendDecision(record: DecisionRecord, file: string = DECISIONS_
 }
 
 /** 讀決策日誌（best-effort）：檔案不存在或個別行壞掉都跳過，永不 throw。 */
-export function readDecisions(file: string = DECISIONS_FILE): DecisionRecord[] {
+export function readDecisions(file: string = decisionsFile()): DecisionRecord[] {
   let raw: string;
   try {
     raw = readFileSync(file, "utf8");

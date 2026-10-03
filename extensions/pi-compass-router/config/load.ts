@@ -34,7 +34,12 @@ import {
  * 唯一的設定檔路徑（Part 3.2：無專案級設定，複製 repo 不得注入路由設定）。
  * 固定為 `~/.pi/agent/pi-compass/config.json`，不可配置。
  */
-export const CONFIG_FILE = join(homedir(), ".pi", "agent", "pi-compass", "config.json");
+export function configFile(): string {
+  return join(homedir(), ".pi", "agent", "pi-compass", "config.json");
+}
+
+/** @deprecated 相容用；新程式碼請用 `configFile()`（呼叫時解析 HOME）。 */
+export const CONFIG_FILE = configFile();
 
 /** 設定載入結果：解析後的設定與驗證警告。 */
 export interface LoadResult {
@@ -518,7 +523,7 @@ export function loadConfig(
   options: { filePath?: string } = {},
 ): LoadResult {
   const warnings: string[] = [];
-  const file = readJsonFile(options.filePath ?? CONFIG_FILE);
+  const file = readJsonFile(options.filePath ?? configFile());
   if (file.warning) warnings.push(file.warning);
 
   const envResult = parseEnvOverrides(env);
@@ -578,7 +583,7 @@ export function validatePatch(key: string, value: unknown): string | null {
  */
 export function writeConfigPatch(
   patch: Record<string, unknown>,
-  filePath: string = CONFIG_FILE,
+  filePath: string = configFile(),
 ): string | null {
   // 1. 全部驗證通過才動檔（原子）。
   for (const [key, value] of Object.entries(patch)) {

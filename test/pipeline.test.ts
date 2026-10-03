@@ -442,6 +442,7 @@ test("apply: confirm flags needsConfirm without blocking on a question", async (
   const result = await applyRoute(decision({ mode: "confirm" }), h);
   assert.equal(result.needsConfirm, true, "index.ts asks, apply does not block");
   assert.equal(result.applied, false, "no model change before the user confirms");
+  assert.equal(calls.entries.length, 0, "no entry before the user decides (W7)");
   assert.equal(calls.model, undefined);
   assert.equal(result.symbol, "→", "still a switch (pending confirmation)");
 });

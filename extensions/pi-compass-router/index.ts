@@ -6,7 +6,7 @@ import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-a
 import { Type } from "typebox";
 
 import { loadConfig, validatePatch, writeConfigPatch } from "./config/load.js";
-import { loadSpend } from "./budget.js";
+import { loadSpend, recordSpend } from "./budget.js";
 import { planTurn, type CostRates } from "./route/plan.js";
 import { compose } from "./route/compose.js";
 import { selectTargets, menuKeys, targetKey, tierOfModel } from "./route/select.js";
@@ -211,7 +211,12 @@ async function routeTurn(
     hooks,
   );
 
-  // confirm 模式：apply 只標 needsConfirm，此處問（有 UI 時）。
+  // confirm 模式：apply 只標 needsConfirm（未寫 entry、未切模型），此處問。
+  // W7（2026-10-03）：yes/no/fail 各產生**唯一的 final outcome**，entry、state
+  // 與決策日誌都只用它——不再出現「確認前先寫 →、拒絕留假紀錄、接受寫兩筆」。
+  let symbol = outcome.symbol;
+  let outcomeKind: string = result.outcome;
+  let appliedNow = outcome.applied;
   if (outcome.needsConfirm && ctx.hasUI) {
     const yes = await ctx.ui.confirm("Switch model?", `${available.provider}/${available.model} for this turn`);
     if (yes) {
@@ -222,35 +227,54 @@ async function routeTurn(
           thinking: plan.composed.thinking,
           mode: "auto",
           tier: result.tier,
+          reason: result.reason,
+          classify: judgment
+            ? { source: judgment.source, latencyMs: judgment.latencyMs, hit: judgment.cacheHit ?? false }
+            : { source: "fallback", latencyMs: 0, hit: false },
+          demand: plan.composed.demand,
+          notes: plan.notes,
           cacheMissUsd: plan.cacheMissUsd,
         },
         hooks,
       );
-      if (applied.applied) {
-        state.switches += 1;
-        state.lastSwitchAtMs = Date.now();
-      }
+      symbol = applied.symbol;
+      outcomeKind = applied.failed ? "apply failed" : "applied";
+      appliedNow = applied.applied;
+    } else {
+      // 拒絕：記一筆 cancelled（×），不切模型。
+      writeEntry(pi, {
+        symbol: "×",
+        tier: result.tier,
+        target: available,
+        reason: "cancelled in confirm",
+        notes: plan.notes,
+        classify: judgment
+          ? { source: judgment.source, latencyMs: judgment.latencyMs, hit: judgment.cacheHit ?? false }
+          : { source: "fallback", latencyMs: 0, hit: false },
+        demand: plan.composed.demand,
+      });
+      symbol = "×";
+      outcomeKind = "cancelled";
+      appliedNow = false;
     }
-  } else if (outcome.applied) {
+  }
+  if (appliedNow) {
     state.switches += 1;
     state.lastSwitchAtMs = Date.now();
-  }
-  if (outcome.applied && state.config.mode === "auto") {
     state.previousModel = current?.model;
   }
 
-  // #9 決策日誌（非內容欄位）+ #8 期望模型更新。
-  const expected = outcome.applied ? targetKey(available) : (nowModel ?? targetKey(available));
-  state.lastExpectedModel = expected;
+  // #9 決策日誌（非內容欄位）+ #8 期望模型更新（一律用 final outcome）。
+  state.lastExpectedModel = appliedNow ? targetKey(available) : (nowModel ?? targetKey(available));
   state.lastDecision = {
     kind: judgment?.kind,
     kindConfidence: judgment?.kindConfidence,
     demand: plan.composed.demand,
     tier: result.tier,
-    model: targetKey(available),
+    model: appliedNow ? targetKey(available) : (nowModel ?? targetKey(available)),
     thinking: plan.composed.thinking,
-    symbol: outcome.symbol,
-    outcome: result.outcome,
+    symbol,
+    outcome: outcomeKind,
     cacheMissUsd: plan.cacheMissUsd,
   };
   if (config.decisionLog) {
@@ -262,8 +286,8 @@ async function routeTurn(
       tier: result.tier,
       model: targetKey(available),
       thinking: plan.composed.thinking,
-      symbol: outcome.symbol,
-      outcome: result.outcome,
+      symbol,
+      outcome: outcomeKind,
       cacheMissUsd: plan.cacheMissUsd,
       classify: judgment
         ? { source: judgment.source, latencyMs: judgment.latencyMs, hit: judgment.cacheHit ?? false }
@@ -338,6 +362,15 @@ export default function compass(pi: ExtensionAPI): void {
       }
     }
   });
+  // W1（2026-10-03 審查）：主要成本=assistant 回覆。先前只記 cloud 分類費，
+  // 導致 budget pressure 幾乎恆為 0。以權威 usage.cost.total 記一次。
+  pi.on("message_end", (event) => {
+    const message = event.message;
+    if (message.role !== "assistant") return;
+    const total = message.usage?.cost?.total;
+    if (typeof total === "number" && total > 0) recordSpend(total);
+  });
+
   pi.on("session_shutdown", () => {
     state.classifier?.dispose?.();
     state.classifier = undefined;

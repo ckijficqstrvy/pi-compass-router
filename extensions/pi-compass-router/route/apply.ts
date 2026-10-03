@@ -120,10 +120,10 @@ export async function applyRoute(
     return result;
   }
 
-  // confirm 的 applied：**只標 needsConfirm，絕不切模型**（詢問是 index.ts 的事，
-  // apply 不阻塞等待輸入——Part 5 補）。thinking 也不套（模型還沒變，無陳舊可修）。
+  // confirm 的 applied：**只標 needsConfirm，絕不切模型、也不寫 entry**（詢問是
+  // index.ts 的事）。2026-10-03（W7）：先前在確認前就寫一筆「已切換」entry，
+  // 拒絕時留下假紀錄、接受時變成兩筆；entry 由呼叫端在 final outcome 後才寫。
   if (outcome === "applied" && mode === "confirm") {
-    hooks.writeEntry?.(entry);
     return result;
   }
 
