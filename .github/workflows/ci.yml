@@ -15,7 +15,8 @@ jobs:
           node-version: 22
           cache: npm
       - run: npm ci
-      # accept.sh 涵蓋 typecheck、測試，以及上游識別／clean-room／模組進度檢查。
-      # 驗收 3/4 需要本機的 pi CLI 與 laya 模型，在 CI 無從提供故跳過。
-      - name: Verify (typecheck + tests + static acceptance)
+      # 先直接跑測試，讓失敗清單出現在 job log；再由 accept.sh 跑靜態驗收。
+      - run: npm run typecheck
+      - run: npm test
+      - name: Static acceptance
         run: COMPASS_ACCEPT_SKIP_ENV=1 bash scripts/accept.sh
