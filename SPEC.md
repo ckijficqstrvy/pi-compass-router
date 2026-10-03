@@ -222,6 +222,7 @@ pi-compass 是一個 pi 擴充，在每一輪對話**開始之前**判斷該用�
 | `display.color` | `rich｜mono` | `rich` | 全彩／單色（只留明暗，適合截圖／淺色主題） |
 | `display.hint` | boolean | `true` | 收合行尾 expand 提示 |
 | `display.rails` | boolean | `true` | 樹狀導軌 `├`/`└` |
+| `display.language` | `zh｜en` | `zh` | 界面語言：完整英文版（非多語框架，en 查不到就回原文） |
 
 `Target` = `{ provider, model, minTier?, thinkingLevel?, priority? }`
 
@@ -1029,7 +1030,7 @@ interface WizardHooks {
 | ③ 模型與層級 | `routes.<tier>`（設為首選…／放到末尾…／移除…／**改回自動（清除你寫的）**／自訂整條字串…；**只寫被改的那一層**）、`kindModels.<kind>`（**新增**，同款動作＋改回層級鏈）、`prefer.<tier>`（**新增**，含清除）、`kindMinimumTier`、`xpremium.enabled`、`useDefaultModels` |
 | ④ 分類器 | `classify.provider`（選項講清楚用哪個分類器，帶目前模型）、`classify.model`/`classify.cloud.*`（laya → HF 快取；cloud → **只放 `provider=typesafe`**；內建預設當種子）、`classify.cache/cacheTtlSeconds`、`classify.timeoutMs/confidenceThreshold/minPromptChars/historyTurns`（**新增**：預設檔位＋自訂） |
 | ⑤ 政策與過濾 | `deny`/`allowProviders`（`✓`/`✗` 切換＋新增 glob）、`ceilings.<tier>`（**新增**：依 profile／各帶檔位／自訂／**清除**） |
-| ⑥ 顯示與呈現 | `display.detail`（三檔帶白話說明）、`display.fields`（`✓`/`✗` 切換迴圈，「← 完成」一次性落檔；加回依固定順序）、`display.badge`、`display.color`（rich/mono）、`display.hint`、`display.rails` |
+| ⑥ 顯示與呈現 | `display.detail`（三檔帶白話說明）、`display.fields`（`✓`/`✗` 切換迴圈，「← 完成」一次性落檔；加回依固定順序）、`display.badge`、`display.color`（rich/mono）、`display.hint`、`display.rails`、`display.language`（中文／English，切換後選單立即換語言） |
 | ⑦ 重設・診斷 | `重設某項回預設`（含 `routes`/`kindModels` 整組回自動、`display`）、**測試分類器**（跑一輪真分類不切換，`hooks.probeClassifier`）、**看鏈的來源**（逐條標來源＋事實檔日期） |
 
 **仍不暴露的設定（先分析再決定給不給）**：
@@ -1132,8 +1133,19 @@ export function writeConfigPatch(patch: Record<string, unknown>, filePath = CONF
 以上可調（2026-10-02 補，Part 3.1 `display.*`、`/compass-set` ⑥ 顯示與呈現）：
 `detail` 三檔密度（compact 只看首行／standard 脈絡一列／full 直接攤開）、
 `fields` 收合列欄位與順序、`badge`/`color`（rich 全彩／mono 單色）、
-`hint`/`rails` 開關。佈局由 `composeLines(view, {expanded, display})` 統一決定，
+`hint`/`rails` 開關、`language` 界面語言（zh／en）。
+佈局由 `composeLines(view, {expanded, display})` 統一決定，
 純文字與卡片共用；session 中途改 display，已寫入的 entry 要等 rebuild 才重畫。
+
+**界面語言（2026-10-02 新增）**：`ui/strings.ts` 是 gettext 式的字典——
+使用者可見字串以 zh 原文為鍵，顯示時經 `t()``（純字串）或標籤模板
+`` t`已寫入 ${key}` ``；en 模式查 `EN` 表、**缺漏回原文**，不會壞。
+選單/提示在 hooks 邊界集中翻譯（`pickFrom` 顯示翻譯、`rawOf` 把固定項
+翻回原文鍵，比較點維持原文）；entry 卡片的提示走 `tl(display.language, …)`
+不依全域狀態。完整性由 `test/i18n.test.ts` 三層把關：每個 `t()` 鍵都有 EN、
+含漢字的模板必須經 `` t `` 包裝、en 模式跑一輪 wizard + entry 不得出現 CJK。
+命令描述（`registerCommand` 的 description）在**註冊時**定案，切換語言後
+要重開 session 才會跟進；選單與訊息則即時。
 
 展開顯示：kind 與信心、complexity、capability、deep-reasoning、
 composed demand、budget pressure、

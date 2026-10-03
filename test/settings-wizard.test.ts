@@ -26,6 +26,7 @@ import {
   type WizardHooks,
 } from "../extensions/pi-compass-router/ui/wizard.js";
 import { cloudClassifierKeys, localCheckpoints, openRouterModelKeys } from "../extensions/pi-compass-router/ui/sources.js";
+import { setLang } from "../extensions/pi-compass-router/ui/strings.js";
 import { DEFAULT_CONFIG, TIERS } from "../extensions/pi-compass-router/schema.js";
 import type { CompassConfig, ThinkingLevel } from "../extensions/pi-compass-router/schema.js";
 
@@ -67,7 +68,12 @@ interface Scripted {
 
 /** 主選單與組內選單都是「選單類」pick：都由 `menu` 依序驅動。 */
 function isMenuPick(label: string): boolean {
-  return label.startsWith("compass 設定") || label.endsWith("：選一項");
+  return (
+    label.startsWith("compass 設定") ||
+    label.startsWith("compass settings") ||
+    label.endsWith("：選一項") ||
+    label.endsWith(": pick one")
+  );
 }
 
 function scripted(script: Script = {}): Scripted {
@@ -773,6 +779,23 @@ test("顯示：欄位 toggle 沒動就不寫檔", async () => {
   await runSettingsWizard(config, s.hooks);
 
   assert.equal(s.writes.length, 0, "無變更 → 取消");
+});
+
+test("顯示：界面語言切 English 寫 display.language=en，後續列改英文", async () => {
+  const config = freshConfig();
+  const s = scripted({
+    menu: ["⑥ 顯示與呈現", "界面語言", "⑥ 顯示與呈現"],
+    answers: { "界面語言": "English" },
+  });
+
+  await runSettingsWizard(config, s.hooks);
+
+  assert.deepEqual(s.writes[0], ["display", { language: "en" }]);
+  assert.equal(config.display.language, "en", "活設定反映語言");
+  // 第二次進 ⑥ 的項目列應已是英文（setLang 在迴圈頂依 live 設定同步）。
+  const rows = s.rowsSeen["⑥ Display: pick one"] ?? [];
+  assert.ok(rows.some((row) => row.startsWith("Detail density")), `rows should be English: ${rows.join(" | ")}`);
+  setLang("zh");
 });
 
 // ---------------------------------------------------------------------------

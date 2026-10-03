@@ -501,6 +501,28 @@ test("display.fields de-duplicates while keeping order", () => {
   }
 });
 
+test("display.language parses zh/en and rejects others", () => {
+  const good = withTempConfig({ display: { language: "en" } });
+  try {
+    const { config } = loadConfig(NO_ENV, { filePath: good.path });
+    assert.equal(config.display.language, "en");
+  } finally {
+    good.cleanup();
+  }
+
+  const bad = withTempConfig({ display: { language: "fr" } });
+  try {
+    const { config, warnings } = loadConfig(NO_ENV, { filePath: bad.path });
+    assert.equal(config.display.language, "zh", "bad language falls back to zh");
+    assert.ok(warnings.some((w) => w.includes("display.language")), "bad language warned");
+  } finally {
+    bad.cleanup();
+  }
+
+  assert.equal(validatePatch("display", { language: "en" }), null);
+  assert.match(String(validatePatch("display", { language: "fr" })), /language/);
+});
+
 test("validatePatch accepts display subkeys and rejects unknown ones", () => {
   assert.equal(validatePatch("display", { detail: "compact" }), null);
   assert.equal(validatePatch("display", { fields: ["kind"], rails: false }), null);

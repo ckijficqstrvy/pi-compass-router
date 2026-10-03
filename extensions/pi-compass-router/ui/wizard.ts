@@ -15,6 +15,7 @@
 // 候選來源（registry、本機 HF 快取等 I/O）在接線層，經 `hooks.candidates`
 // 注入；未實作或回空 → 該項仍以內建預設為種子（不打字）。
 import { MODEL_FACTS, factsValid } from "../policy/facts.js";
+import { t, rawOf, setLang } from "./strings.js";
 import { DEFAULT_CONFIG, DISPLAY_DETAILS, DISPLAY_FIELDS, PROFILE_CEILINGS, TIERS } from "../schema.js";
 import type {
   CompassConfig,
@@ -129,7 +130,7 @@ const PROVIDER_LABELS: Readonly<Record<string, string>> = {
  * 顯示層不該吞掉使用者的自訂 provider）。
  */
 export function providerLabel(provider: string): string {
-  return PROVIDER_LABELS[provider] ?? provider;
+  return PROVIDER_LABELS[provider] !== undefined ? t(PROVIDER_LABELS[provider]) : provider;
 }
 
 /**
@@ -141,7 +142,7 @@ export function providerLabel(provider: string): string {
 export function providerFromLabel(label: string): string | null {
   const lowered = label.toLowerCase();
   for (const [code, text] of Object.entries(PROVIDER_LABELS)) {
-    const registered = text.toLowerCase();
+    const registered = t(text).toLowerCase();
     if (lowered === registered || lowered === code || lowered.startsWith(registered)) return code;
   }
   return null;
@@ -151,11 +152,11 @@ export function providerFromLabel(label: string): string | null {
 export function modeLabel(mode: Mode): string {
   switch (mode) {
     case "auto":
-      return "auto — 自動切換";
+      return t("auto — 自動切換");
     case "confirm":
-      return "confirm — 每次切換前先問你";
+      return t("confirm — 每次切換前先問你");
     case "notify":
-      return "notify — 只提醒不切換";
+      return t("notify — 只提醒不切換");
   }
 }
 
@@ -170,15 +171,15 @@ export function modeFromLabel(label: string): Mode | null {
 export function tierLabel(tier: Tier): string {
   switch (tier) {
     case "quick":
-      return "quick — 最快最省";
+      return t("quick — 最快最省");
     case "standard":
-      return "standard — 一般預設";
+      return t("standard — 一般預設");
     case "high":
-      return "high — 困難任務";
+      return t("high — 困難任務");
     case "premium":
-      return "premium — 旗艦";
+      return t("premium — 旗艦");
     case "xpremium":
-      return "xpremium — 需 xpremium.enabled";
+      return t("xpremium — 需 xpremium.enabled");
   }
 }
 
@@ -197,11 +198,11 @@ export function profileLabel(profile: Profile): string {
   const ceilings = PROFILE_CEILINGS[profile];
   const bands = TIERS.map((tier) => `${tier} ${ceilings[tier] === null ? "∞" : `$${ceilings[tier]}`}`).join(" · ");
   const intent: Record<Profile, string> = {
-    cheap: "上限下修，更早用便宜模型",
-    balanced: "折衷預設",
-    quality: "放寬上限，品質優先",
+    cheap: t("上限下修，更早用便宜模型"),
+    balanced: t("折衷預設"),
+    quality: t("放寬上限，品質優先"),
   };
-  return `${profile} — ${intent[profile]}（$/M 上限：${bands}）`;
+  return t`${profile} — ${intent[profile]}（$/M 上限：${bands}）`;
 }
 
 /** 顯示標籤 → profile：取前綴 token（不分大小寫）；不認識回 `null`。 */
@@ -216,13 +217,13 @@ const THINKING_LEVELS: readonly ThinkingLevel[] = ["off", "minimal", "low", "med
 /** 思考層級 → 顯示標籤。 */
 export function thinkingLabel(level: ThinkingLevel): string {
   const intent: Record<ThinkingLevel, string> = {
-    off: "不思考",
-    minimal: "最少",
-    low: "少",
-    medium: "中",
-    high: "多",
-    xhigh: "很多",
-    max: "最多",
+    off: t("不思考"),
+    minimal: t("最少"),
+    low: t("少"),
+    medium: t("中"),
+    high: t("多"),
+    xhigh: t("很多"),
+    max: t("最多"),
   };
   return `${level} — ${intent[level]}`;
 }
@@ -308,6 +309,7 @@ type MenuItem =
   | "color"
   | "hint"
   | "rails"
+  | "uiLang"
   | "reset"
   | "testClassifier"
   | "chainSource";
@@ -318,7 +320,7 @@ const GROUP_ITEMS: Readonly<Record<Group, readonly MenuItem[]>> = {
   models: ["chains", "kindModels", "prefer", "kindTiers", "xpremium", "useDefaultModels"],
   classifier: ["provider", "checkpoint", "classifyCache", "classifyNums"],
   policy: ["filters", "ceilings"],
-  display: ["detail", "fields", "badge", "color", "hint", "rails"],
+  display: ["detail", "fields", "badge", "color", "hint", "rails", "uiLang"],
   diagnostics: ["reset", "testClassifier", "chainSource"],
 };
 
@@ -354,6 +356,7 @@ const ITEM_NAMES: Readonly<Record<MenuItem, string>> = {
   color: "配色",
   hint: "expand 提示",
   rails: "樹狀導軌",
+  uiLang: "界面語言",
   reset: "重設某項回預設",
   testClassifier: "測試分類器",
   chainSource: "看鏈的來源",
@@ -363,14 +366,14 @@ const MENU_LABEL = "compass 設定（↑↓ 選組，Enter 進入，Esc 結束�
 const BACK_OPTION = "← 返回";
 const DONE_OPTION = "結束";
 
-const money = (n: number | null): string => (n === null ? "無上限" : `$${n.toFixed(2)}`);
-const onOff = (value: boolean): string => (value ? "開" : "關");
+const money = (n: number | null): string => (n === null ? t("無上限") : `$${n.toFixed(2)}`);
+const onOff = (value: boolean): string => (value ? t("開") : t("關"));
 
 /** 呈現密度 → 白話說明（項目列顯示用）。 */
-const DETAIL_HINT: Record<DisplayDetail, string> = {
-  compact: "只看決策首行",
-  standard: "脈絡一列（預設）",
-  full: "直接攤開明細",
+const DETAIL_HINT: Record<DisplayDetail, () => string> = {
+  compact: () => t("只看決策首行"),
+  standard: () => t("脈絡一列（預設）"),
+  full: () => t("直接攤開明細"),
 };
 
 /** 去重（保序）：候選清單合併用。 */
@@ -439,7 +442,7 @@ function notice(
   message: string,
   type: "info" | "warning" | "error" = "warning",
 ): void {
-  hooks.notify?.(message, type);
+  hooks.notify?.(t(message), type);
 }
 
 /**
@@ -451,9 +454,12 @@ async function pickFrom(
   label: string,
   options: string[],
 ): Promise<string | undefined | null> {
-  const picked = await hooks.pick(label, options);
+  // 顯示翻譯集中在此：固定項（raw 鍵）翻譯後顯示，組合項（來源已翻）原樣。
+  // 回傳時 rawOf 把固定項翻回原文鍵——比較點維持原文，不必逐處改。
+  const shown = options.map((option) => t(option));
+  const picked = await hooks.pick(t(label), shown);
   if (picked === null) return undefined;
-  return options.includes(picked) ? picked : null;
+  return shown.includes(picked) ? rawOf(picked) : null;
 }
 
 /**
@@ -470,12 +476,12 @@ async function promptLoop(
 ): Promise<string | undefined> {
   let text = initial;
   for (;;) {
-    const raw = await hooks.prompt(label, text);
+    const raw = await hooks.prompt(t(label), text);
     if (raw === null) return undefined;
     const trimmed = raw.trim();
     const problem = check(trimmed);
     if (problem === null) return trimmed;
-    notice(hooks, `${problem}——再試一次（Esc 取消）`, "warning");
+    notice(hooks, t`${problem}——再試一次（Esc 取消）`, "warning");
     text = raw;
   }
 }
@@ -519,14 +525,14 @@ async function pickModelFrom(
 
     const keyword = await promptLoop(
       hooks,
-      `${label}：關鍵字（篩選 ${candidates.length} 筆）`,
+      t`${label}：關鍵字（篩選 ${candidates.length} 筆）`,
       "",
-      (text) => (text === "" ? "關鍵字不能是空字串" : null),
+      (text) => (text === "" ? t("關鍵字不能是空字串") : null),
     );
     if (keyword === undefined) return undefined;
     const hits = candidates.filter((key) => key.toLowerCase().includes(keyword.toLowerCase()));
     if (hits.length === 0) {
-      notice(hooks, `「${keyword}」沒有符合的模型——再搜一次（Esc 取消）`, "warning");
+      notice(hooks, t`「${keyword}」沒有符合的模型——再搜一次（Esc 取消）`, "warning");
       pool = candidates;
       continue;
     }
@@ -549,13 +555,13 @@ async function chooseModel(
   const candidates = await modelCandidates(config, hooks);
   const check = (text: string): string | null => (text === "" ? "模型 id 不能是空字串" : null);
   if (candidates.length === 0) {
-    const typed = await promptLoop(hooks, `${label}（provider/model）`, initial, check);
+    const typed = await promptLoop(hooks, t`${label}（provider/model）`, initial, check);
     return typed === undefined ? undefined : typed;
   }
   const picked = await pickModelFrom(hooks, label, candidates);
   if (picked === undefined || picked === null) return picked;
   if (picked !== CUSTOM_OPTION) return picked;
-  const typed = await promptLoop(hooks, `${label}（provider/model）`, initial, check);
+  const typed = await promptLoop(hooks, t`${label}（provider/model）`, initial, check);
   return typed === undefined ? undefined : typed;
 }
 
@@ -564,9 +570,9 @@ function chainSummary(chain: readonly Target[]): string {
   const own = chain.filter((target) => target.explicit).length;
   const derived = chain.length - own;
   const parts: string[] = [];
-  if (derived > 0) parts.push(`自動${derived}`);
-  if (own > 0) parts.push(`你寫${own}`);
-  return `${chain.length}（${parts.join("·") || "空"}）`;
+  if (derived > 0) parts.push(t`自動${derived}`);
+  if (own > 0) parts.push(t`你寫${own}`);
+  return t`${chain.length}（${parts.join("·") || t("空")}）`;
 }
 
 // ---------------------------------------------------------------------------
@@ -577,32 +583,32 @@ function chainSummary(chain: readonly Target[]): string {
 function renderGroupRow(group: Group, config: CompassConfig): string {
   switch (group) {
     case "routing":
-      return `① 路由行為 ........... ${config.mode} · 粘住 ${onOff(config.stickiness)} · 挑模型 ${config.modelPick}`;
+      return t`① 路由行為 ........... ${config.mode} · 粘住 ${onOff(config.stickiness)} · 挑模型 ${config.modelPick}`;
     case "budget":
-      return `② 預算與花費 .......... ${money(config.budget.dailyUsd)}/日 · ${money(config.budget.monthlyUsd)}/月 · ${config.profile}`;
+      return t`② 預算與花費 .......... ${money(config.budget.dailyUsd)}/日 · ${money(config.budget.monthlyUsd)}/月 · ${config.profile}`;
     case "models": {
       const stale = staleDays();
-      return `③ 模型與層級 .......... quick ${chainSummary(config.routes.quick)} · 專家 ${Object.keys(config.kindModels).length} 種${stale === null ? "" : ` ⚠快照 ${stale}天`}`;
+      return t`③ 模型與層級 .......... quick ${chainSummary(config.routes.quick)} · 專家 ${Object.keys(config.kindModels).length} 種${stale === null ? "" : t` ⚠快照 ${stale}天`}`;
     }
     case "classifier":
-      return `④ 分類器 ............. ${config.classify.provider} · TTL ${config.classify.cacheTtlSeconds}s · timeout ${config.classify.timeoutMs}ms`;
+      return t`④ 分類器 ............. ${config.classify.provider} · TTL ${config.classify.cacheTtlSeconds}s · timeout ${config.classify.timeoutMs}ms`;
     case "policy": {
       const preferCount = Object.values(config.prefer).reduce((n, list) => n + (list?.length ?? 0), 0);
       const ceilingsCount = Object.keys(config.ceilings).length;
-      return `⑤ 政策與過濾 .......... deny ${config.deny.length} · ceilings ${ceilingsCount === 0 ? "依 profile" : `${ceilingsCount} 自訂`} · prefer ${preferCount}`;
+      return t`⑤ 政策與過濾 .......... deny ${config.deny.length} · ceilings ${ceilingsCount === 0 ? t("依 profile") : t`${ceilingsCount} 自訂`} · prefer ${preferCount}`;
     }
     case "display": {
       const d = config.display;
-      return `⑥ 顯示與呈現 ........... ${d.detail} · 欄位 ${d.fields.length} · ${d.color}${d.badge ? " · 徽章" : ""}`;
+      return t`⑥ 顯示與呈現 ........... ${d.detail} · 欄位 ${d.fields.length} · ${d.color}${d.badge ? t(" · 徽章") : ""}`;
     }
     case "diagnostics":
-      return `⑦ 重設・診斷 .......... 重設某項 · 測試分類器 · 看鏈的來源`;
+      return t("⑦ 重設・診斷 .......... 重設某項 · 測試分類器 · 看鏈的來源");
   }
 }
 
 /** 項目列（組內選單）：`名 … 目前值`；名即前綴，供 itemOf 認列。 */
 function renderItemRow(item: MenuItem, config: CompassConfig): string {
-  const name = ITEM_NAMES[item];
+  const name = t(ITEM_NAMES[item]);
   const pad = " …… ";
   switch (item) {
     case "enabled":
@@ -610,43 +616,43 @@ function renderItemRow(item: MenuItem, config: CompassConfig): string {
     case "mode":
       return `${name}${pad}${modeLabel(config.mode)}`;
     case "stickiness":
-      return `${name}${pad}${onOff(config.stickiness)}（避免反覆切換）`;
+      return t`${name}${pad}${onOff(config.stickiness)}（避免反覆切換）`;
     case "modelPick":
-      return `${name}${pad}${config.modelPick}（menu = 每次用選單挑）`;
+      return t`${name}${pad}${config.modelPick}（menu = 每次用選單挑）`;
     case "allowUnratedPicks":
-      return `${name}${pad}${onOff(config.allowUnratedPicks)}（事實檔沒有的模型也能被選）`;
+      return t`${name}${pad}${onOff(config.allowUnratedPicks)}（事實檔沒有的模型也能被選）`;
     case "thinking": {
       const pin = config.thinking.pin;
-      return `${name}${pad}${pin ? `pin ${pin}` : "依層級預設"}`;
+      return `${name}${pad}${pin ? `pin ${pin}` : t("依層級預設")}`;
     }
     case "cache":
-      return `${name}${pad}${onOff(config.cache.aware)} · 冷卻 ${config.cache.cooldownSeconds}s`;
+      return t`${name}${pad}${onOff(config.cache.aware)} · 冷卻 ${config.cache.cooldownSeconds}s`;
     case "daily":
       return `${name}${pad}${money(config.budget.dailyUsd)}`;
     case "monthly":
       return `${name}${pad}${money(config.budget.monthlyUsd)}`;
     case "ratios":
-      return `${name}${pad}${Math.round(config.budget.softRatio * 100)}%（警戒）/ ${Math.round(config.budget.hardRatio * 100)}%（強制）`;
+      return t`${name}${pad}${Math.round(config.budget.softRatio * 100)}%（警戒）/ ${Math.round(config.budget.hardRatio * 100)}%（強制）`;
     case "profile":
       return `${name}${pad}${config.profile}`;
     case "freeOnly":
-      return `${name}${pad}${onOff(config.freeOnly)}（只用 $0 模型）`;
+      return t`${name}${pad}${onOff(config.freeOnly)}（只用 $0 模型）`;
     case "chains":
       return `${name}${pad}quick ${chainSummary(config.routes.quick)} · high ${chainSummary(config.routes.high)}`;
     case "kindModels":
-      return `${name}${pad}${Object.keys(config.kindModels).length} 種有專家鏈`;
+      return t`${name}${pad}${Object.keys(config.kindModels).length} 種有專家鏈`;
     case "prefer": {
       const count = Object.values(config.prefer).reduce((n, list) => n + (list?.length ?? 0), 0);
-      return `${name}${pad}${count === 0 ? "未設定" : `${count} 層有偏好首選`}`;
+      return `${name}${pad}${count === 0 ? t("未設定") : t`${count} 層有偏好首選`}`;
     }
     case "kindTiers": {
       const parts = Object.entries(config.kindMinimumTier).map(([kind, tier]) => `${kind}≥${tier}`);
       return `${name}${pad}${parts.join(" · ")}`;
     }
     case "xpremium":
-      return `${name}${pad}${onOff(config.xpremium.enabled)}（premium 之上再一層）`;
+      return t`${name}${pad}${onOff(config.xpremium.enabled)}（premium 之上再一層）`;
     case "useDefaultModels":
-      return `${name}${pad}${onOff(config.useDefaultModels)}（關 = 只用你自帶的模型）`;
+      return t`${name}${pad}${onOff(config.useDefaultModels)}（關 = 只用你自帶的模型）`;
     case "provider":
       return `${name}${pad}${providerLabel(config.classify.provider)}`;
     case "checkpoint": {
@@ -659,34 +665,36 @@ function renderItemRow(item: MenuItem, config: CompassConfig): string {
     case "classifyCache":
       return `${name}${pad}${onOff(config.classify.cache)} · TTL ${config.classify.cacheTtlSeconds}s`;
     case "classifyNums":
-      return `${name}${pad}timeout ${config.classify.timeoutMs}ms · 門檻 ${config.classify.confidenceThreshold} · 最短 ${config.classify.minPromptChars} 字`;
+      return t`${name}${pad}timeout ${config.classify.timeoutMs}ms · 門檻 ${config.classify.confidenceThreshold} · 最短 ${config.classify.minPromptChars} 字`;
     case "filters":
       return `${name}${pad}deny ${config.deny.length} · allowProviders ${config.allowProviders.length}`;
     case "ceilings": {
       const count = Object.keys(config.ceilings).length;
-      return `${name}${pad}${count === 0 ? "依 profile 價格帶" : `${count} 層自訂`}`;
+      return `${name}${pad}${count === 0 ? t("依 profile 價格帶") : t`${count} 層自訂`}`;
     }
     case "detail":
-      return `${name}${pad}${config.display.detail}（${DETAIL_HINT[config.display.detail]}）`;
+      return t`${name}${pad}${config.display.detail}（${DETAIL_HINT[config.display.detail]()}）`;
     case "fields": {
       const shown = config.display.fields;
       const chips = DISPLAY_FIELDS.map((f) => (shown.includes(f) ? f : `-${f}`)).join(" ");
-      return `${name}${pad}${chips}（- = 不顯示）`;
+      return t`${name}${pad}${chips}（- = 不顯示）`;
     }
     case "badge":
       return `${name}${pad}${onOff(config.display.badge)}`;
     case "color":
-      return `${name}${pad}${config.display.color === "mono" ? "mono（單色，只留明暗）" : "rich（全彩）"}`;
+      return `${name}${pad}${config.display.color === "mono" ? t("mono（單色，只留明暗）") : t("rich（全彩）")}`;
     case "hint":
       return `${name}${pad}${onOff(config.display.hint)}`;
     case "rails":
       return `${name}${pad}${onOff(config.display.rails)}`;
+    case "uiLang":
+      return `${name}${pad}${config.display.language === "en" ? "English" : t("中文")}`;
     case "reset":
       return `${name}${pad}…`;
     case "testClassifier":
-      return `${name}${pad}跑一輪真分類（不切換）`;
+      return t`${name}${pad}跑一輪真分類（不切換）`;
     case "chainSource":
-      return `${name}${pad}哪一層在決定每條鏈`;
+      return t`${name}${pad}哪一層在決定每條鏈`;
   }
 }
 
@@ -707,22 +715,25 @@ export async function runSettingsWizard(
 ): Promise<void> {
   let live = config;
   for (;;) {
+    setLang(live.display.language);
     const groupRows = GROUPS.map((group) => renderGroupRow(group.id, live));
-    const chosen = await hooks.pick(MENU_LABEL, [...groupRows, DONE_OPTION]);
-    if (chosen === null || chosen === DONE_OPTION) return;
+    const chosen = await pickFrom(hooks, MENU_LABEL, [...groupRows, DONE_OPTION]);
+    if (chosen === undefined || chosen === null || chosen === DONE_OPTION) return;
     const group = groupOf(chosen);
     if (group === null) {
-      notice(hooks, `未識別的選單項目：${chosen.slice(0, 40)}`, "error");
+      notice(hooks, t`未識別的選單項目：${chosen.slice(0, 40)}`, "error");
       return;
     }
 
     for (;;) {
+      // 語言可能剛在這一層被改（uiLang 項目）——每輪同步，列立即換語言。
+      setLang(live.display.language);
       const itemRows = GROUP_ITEMS[group].map((item) => renderItemRow(item, live));
-      const picked = await hooks.pick(`${groupName(group)}：選一項`, [...itemRows, BACK_OPTION]);
-      if (picked === null || picked === BACK_OPTION) break;
+      const picked = await pickFrom(hooks, t`${groupName(group)}：選一項`, [...itemRows, BACK_OPTION]);
+      if (picked === undefined || picked === null || picked === BACK_OPTION) break;
       const item = itemOf(group, picked);
       if (item === null) {
-        notice(hooks, `未識別的項目：${picked.slice(0, 40)}`, "error");
+        notice(hooks, t`未識別的項目：${picked.slice(0, 40)}`, "error");
         break;
       }
 
@@ -730,10 +741,10 @@ export async function runSettingsWizard(
       if (edited === undefined || edited === null) continue; // 取消 / 寫入被拒
       const problem = hooks.write(edited.key, edited.value);
       if (problem !== null) {
-        notice(hooks, `未寫入：${problem}`, "error");
+        notice(hooks, t`未寫入：${problem}`, "error");
         continue;
       }
-      notice(hooks, `已寫入 ${edited.key}`, "info");
+      notice(hooks, t`已寫入 ${edited.key}`, "info");
       const fresh = await hooks.reload();
       if (fresh !== null && fresh !== undefined && typeof fresh === "object") live = fresh;
       Object.assign(live, edited.applyTo(live));
@@ -742,21 +753,21 @@ export async function runSettingsWizard(
 }
 
 function groupName(group: Group): string {
-  return GROUPS.find((entry) => entry.id === group)?.name ?? group;
+  return t(GROUPS.find((entry) => entry.id === group)?.name ?? group);
 }
 
-/** 組列 → Group（列首就是組名，前綴比對）。 */
+/** 組列 → Group（列首就是組圈號，語言中立，前綴比對）。 */
 function groupOf(row: string): Group | null {
   for (const group of GROUPS) {
-    if (row.startsWith(group.name)) return group.id;
+    if (row.startsWith(group.name.slice(0, 1))) return group.id;
   }
   return null;
 }
 
-/** 項目列 → MenuItem（`ITEM_NAMES` 前綴比對，值變了也認得）。 */
+/** 項目列 → MenuItem（`ITEM_NAMES` 前綴比對，值變了也認得；兩端同語言）。 */
 function itemOf(group: Group, row: string): MenuItem | null {
   for (const item of GROUP_ITEMS[group]) {
-    if (row.startsWith(ITEM_NAMES[item])) return item;
+    if (row.startsWith(t(ITEM_NAMES[item]))) return item;
   }
   return null;
 }
@@ -814,7 +825,7 @@ async function editItem(
     case "mode": {
       const picked = await pickFrom(
         hooks,
-        `路由模式（目前：${config.mode}）`,
+        t`路由模式（目前：${config.mode}）`,
         (["auto", "confirm", "notify"] as Mode[]).map(modeLabel),
       );
       if (picked === undefined || picked === null) return picked;
@@ -852,7 +863,7 @@ async function editItem(
       const kind = isPin ? "pin" : scopeRow;
 
       const levelRows = [CLEAR_OPTION, ...THINKING_LEVELS.map(thinkingLabel)];
-      const levelRow = await pickFrom(hooks, `${kind} 的思考層級`, levelRows);
+      const levelRow = await pickFrom(hooks, t`${kind} 的思考層級`, levelRows);
       if (levelRow === undefined || levelRow === null) return levelRow;
       const level = levelRow === CLEAR_OPTION ? null : thinkingFromLabel(levelRow);
       if (level === undefined || (levelRow !== CLEAR_OPTION && level === null)) return null;
@@ -872,11 +883,11 @@ async function editItem(
 
     case "cache": {
       const fields: ReadonlyArray<{ key: string; label: string }> = [
-        { key: "aware", label: `感知（aware）— ${onOff(config.cache.aware)}` },
-        { key: "cooldownSeconds", label: `冷卻秒數 — ${config.cache.cooldownSeconds}s` },
-        { key: "deadband", label: `死區 deadband — ${config.cache.deadband}` },
-        { key: "maxPenaltyUsd", label: `切換懲罰上限 — $${config.cache.maxPenaltyUsd}` },
-        { key: "bypassTierDelta", label: `繞過層級差 — ${config.cache.bypassTierDelta}` },
+        { key: "aware", label: t`感知（aware）— ${onOff(config.cache.aware)}` },
+        { key: "cooldownSeconds", label: t`冷卻秒數 — ${config.cache.cooldownSeconds}s` },
+        { key: "deadband", label: t`死區 deadband — ${config.cache.deadband}` },
+        { key: "maxPenaltyUsd", label: t`切換懲罰上限 — $${config.cache.maxPenaltyUsd}` },
+        { key: "bypassTierDelta", label: t`繞過層級差 — ${config.cache.bypassTierDelta}` },
       ];
       const fieldRow = await pickFrom(hooks, "切換成本 cache：選欄位", fields.map((f) => f.label));
       if (fieldRow === undefined || fieldRow === null) return fieldRow;
@@ -908,9 +919,9 @@ async function editItem(
         if (picked === CUSTOM_OPTION) {
           const typed = await promptLoop(
             hooks,
-            `${name}（數字）`,
+            t`${name}（數字）`,
             String(current),
-            (text) => (parseAmount(text) !== null ? null : `「${text}」不是有效數字`),
+            (text) => (parseAmount(text) !== null ? null : t`「${text}」不是有效數字`),
           );
           if (typed === undefined) return undefined;
           patch = { [field.key]: parseAmount(typed) };
@@ -929,13 +940,13 @@ async function editItem(
     case "daily":
     case "monthly": {
       const daily = item === "daily";
-      const label = daily ? "每日上限" : "每月上限";
+      const label = daily ? t("每日上限") : t("每月上限");
       const dim = daily ? ("dailyUsd" as const) : ("monthlyUsd" as const);
       const current = daily ? config.budget.dailyUsd : config.budget.monthlyUsd;
       const presets: readonly number[] = daily ? DAILY_PRESETS : MONTHLY_PRESETS;
 
       const options: string[] = ["無上限（清除）"];
-      if (current !== null && !presets.includes(current)) options.push(`沿用目前 ${money(current)}`);
+      if (current !== null && !presets.includes(current)) options.push(t`沿用目前 ${money(current)}`);
       for (const preset of presets) options.push(money(preset));
       options.push(CUSTOM_OPTION);
 
@@ -944,16 +955,16 @@ async function editItem(
 
       let amount: number | null;
       if (picked === "無上限（清除）") amount = null;
-      else if (picked.startsWith("沿用目前")) amount = current;
+      else if (picked.startsWith(t("沿用目前"))) amount = current;
       else if (picked === CUSTOM_OPTION) {
         const typed = await promptLoop(
           hooks,
-          `${label}（美元數字，留空 = 無上限）`,
+          t`${label}（美元數字，留空 = 無上限）`,
           current === null ? "" : String(current),
           (text) => {
             if (text === "") return null;
             const value = parseAmount(text);
-            return value !== null && value > 0 ? null : `「${text}」不是有效金額（需 > 0；要清除請留空）`;
+            return value !== null && value > 0 ? null : t`「${text}」不是有效金額（需 > 0；要清除請留空）`;
           },
         );
         if (typed === undefined) return undefined;
@@ -972,8 +983,8 @@ async function editItem(
 
     case "ratios": {
       const fields = [
-        { key: "softRatio" as const, label: `軟警戒線 softRatio — ${config.budget.softRatio}` },
-        { key: "hardRatio" as const, label: `強制線 hardRatio — ${config.budget.hardRatio}` },
+        { key: "softRatio" as const, label: t`軟警戒線 softRatio — ${config.budget.softRatio}` },
+        { key: "hardRatio" as const, label: t`強制線 hardRatio — ${config.budget.hardRatio}` },
       ];
       const fieldRow = await pickFrom(hooks, "預算警戒線：選欄位", fields.map((f) => f.label));
       if (fieldRow === undefined || fieldRow === null) return fieldRow;
@@ -989,9 +1000,9 @@ async function editItem(
 
       let ratio: number;
       if (picked === CUSTOM_OPTION) {
-        const typed = await promptLoop(hooks, `${field.key}（0–1 之間）`, String(current), (text) => {
+        const typed = await promptLoop(hooks, t`${field.key}（0–1 之間）`, String(current), (text) => {
           const value = parseAmount(text);
-          return value !== null && value <= 1 ? null : `「${text}」不是 0–1 之間的數字`;
+          return value !== null && value <= 1 ? null : t`「${text}」不是 0–1 之間的數字`;
         });
         if (typed === undefined) return undefined;
         ratio = parseAmount(typed) as number;
@@ -1009,7 +1020,7 @@ async function editItem(
     case "profile": {
       const picked = await pickFrom(
         hooks,
-        `價格 profile（目前：${config.profile}）`,
+        t`價格 profile（目前：${config.profile}）`,
         (["cheap", "balanced", "quality"] as Profile[]).map(profileLabel),
       );
       if (picked === undefined || picked === null) return picked;
@@ -1046,7 +1057,7 @@ async function editItem(
       const pool = pools.find((candidate) => poolRow.startsWith(`${candidate.name} — `));
       if (!pool) return null;
 
-      const chainText = pool.chain.length === 0 ? "(空)" : pool.chain.map(keyOf).join(" → ");
+      const chainText = pool.chain.length === 0 ? t("(空)") : pool.chain.map(keyOf).join(" → ");
       const actions = [
         "設為首選…",
         "放到末尾…",
@@ -1054,7 +1065,7 @@ async function editItem(
         ...(pool.chain.some((target) => target.explicit) ? ["改回自動（清除你寫的）"] : []),
         "自訂整條字串…",
       ];
-      const action = await pickFrom(hooks, `${pool.name} 鏈 · 目前 ${chainText}`, actions);
+      const action = await pickFrom(hooks, t`${pool.name} 鏈 · 目前 ${chainText}`, actions);
       if (action === undefined || action === null) return action;
 
       const key = isKind ? "kindModels" : "routes";
@@ -1078,14 +1089,14 @@ async function editItem(
       if (action === "自訂整條字串…") {
         const typed = await promptLoop(
           hooks,
-          `${pool.name} 鏈（provider/model, 逗號分隔）`,
+          t`${pool.name} 鏈（provider/model, 逗號分隔）`,
           pool.chain.map(keyOf).join(", "),
-          (text) => (parseChain(text).length > 0 ? null : "至少要一個模型，例如 openrouter/x"),
+          (text) => (parseChain(text).length > 0 ? null : t("至少要一個模型，例如 openrouter/x")),
         );
         if (typed === undefined) return undefined;
         next = parseChain(typed);
       } else if (action === "移除一個模型…") {
-        const pickedKey = await pickFrom(hooks, `${pool.name} 鏈：移除哪一個？`, pool.chain.map(keyOf));
+        const pickedKey = await pickFrom(hooks, t`${pool.name} 鏈：移除哪一個？`, pool.chain.map(keyOf));
         if (pickedKey === undefined || pickedKey === null) return pickedKey;
         next = pool.chain.filter((target) => keyOf(target) !== pickedKey);
         if (next.length === 0) {
@@ -1096,7 +1107,7 @@ async function editItem(
         const chosenModel = await chooseModel(
           hooks,
           config,
-          `${pool.name} 鏈：${action === "設為首選…" ? "選首選模型" : "選要放的模型"}`,
+          t`${pool.name} 鏈：${action === "設為首選…" ? t("選首選模型") : t("選要放的模型")}`,
           pool.chain[0] ? keyOf(pool.chain[0]) : "",
         );
         if (chosenModel === undefined || chosenModel === null) return chosenModel;
@@ -1116,15 +1127,15 @@ async function editItem(
     case "prefer": {
       const tierRows = TIERS.map((tier) => {
         const head = config.prefer[tier]?.[0];
-        return `${tier}（${head ?? "未設定"}）`;
+        return t`${tier}（${head ?? t("未設定")}）`;
       });
       const tierRow = await pickFrom(hooks, "prefer 首選：選層級", tierRows);
       if (tierRow === undefined || tierRow === null) return tierRow;
-      const tier = tierRow.slice(0, tierRow.indexOf("（")) as Tier;
+      const tier = tierRow.split(/[（(]/)[0] as Tier;
 
       const picked = await pickModelFrom(
         hooks,
-        `${tier} 的偏好首選（會插到鏈首）`,
+        t`${tier} 的偏好首選（會插到鏈首）`,
         await modelCandidates(config, hooks),
         [CLEAR_OPTION],
       );
@@ -1143,8 +1154,8 @@ async function editItem(
       }
       let model = picked;
       if (model === CUSTOM_OPTION) {
-        const typed = await promptLoop(hooks, `${tier} 偏好首選（模型 id）`, config.prefer[tier]?.[0] ?? "", (text) =>
-          text === "" ? "模型 id 不能是空字串" : null,
+        const typed = await promptLoop(hooks, t`${tier} 偏好首選（模型 id）`, config.prefer[tier]?.[0] ?? "", (text) =>
+          text === "" ? t("模型 id 不能是空字串") : null,
         );
         if (typed === undefined) return undefined;
         model = typed;
@@ -1158,12 +1169,12 @@ async function editItem(
 
     case "kindTiers": {
       const kinds = dedupe([...Object.keys(config.taskKinds), ...Object.keys(config.kindMinimumTier)]);
-      const kindRows = kinds.map((kind) => `${kind} — 目前 ${config.kindMinimumTier[kind] ?? "（無下限）"}`);
+      const kindRows = kinds.map((kind) => t`${kind} — 目前 ${config.kindMinimumTier[kind] ?? t("（無下限）")}`);
       const kindRow = await pickFrom(hooks, "任務最低層級：選種類", kindRows);
       if (kindRow === undefined || kindRow === null) return kindRow;
       const kind = kindRow.split(" — ")[0];
 
-      const tierPicked = await pickFrom(hooks, `${kind} 的最低層級`, TIERS.map(tierLabel));
+      const tierPicked = await pickFrom(hooks, t`${kind} 的最低層級`, TIERS.map(tierLabel));
       if (tierPicked === undefined || tierPicked === null) return tierPicked;
       const tier = tierFromLabel(tierPicked);
       if (tier === null) return null;
@@ -1195,7 +1206,7 @@ async function editItem(
       // （動態尾巴由 providerFromLabel 的前綴比對認回代號）。
       const cloudModel = `${config.classify.cloud.provider}/${config.classify.cloud.model}`;
       const options = [providerLabel("laya"), `${providerLabel("cloud")} · ${cloudModel}`];
-      const picked = await pickFrom(hooks, `分類後端（目前：${config.classify.provider}）`, options);
+      const picked = await pickFrom(hooks, t`分類後端（目前：${config.classify.provider}）`, options);
       if (picked === undefined || picked === null) return picked;
       const provider = providerFromLabel(picked);
       if (provider === null || (provider !== "laya" && provider !== "cloud")) return null;
@@ -1215,13 +1226,13 @@ async function editItem(
         : DEFAULT_CONFIG.classify.model;
       const provided = dedupe((await hooks.candidates?.(cloud ? "classifier" : "checkpoint")) ?? []);
       const options = dedupe([current, seed, ...provided]);
-      const check = (text: string): string | null => (text === "" ? "模型 id 不能是空字串" : null);
+      const check = (text: string): string | null => (text === "" ? t("模型 id 不能是空字串") : null);
 
       const picked = await pickFrom(hooks, label, [...options, CUSTOM_OPTION]);
       if (picked === undefined || picked === null) return picked;
       let chosen: string;
       if (picked === CUSTOM_OPTION) {
-        const typed = await promptLoop(hooks, `${label}（id 或路徑）`, current, check);
+        const typed = await promptLoop(hooks, t`${label}（id 或路徑）`, current, check);
         if (typed === undefined) return undefined;
         chosen = typed;
       } else chosen = picked;
@@ -1237,8 +1248,8 @@ async function editItem(
 
     case "classifyCache": {
       const fields: ReadonlyArray<{ key: "cache" | "cacheTtlSeconds"; label: string }> = [
-        { key: "cache", label: `分類結果快取 — ${onOff(config.classify.cache)}` },
-        { key: "cacheTtlSeconds", label: `快取秒數（TTL）— ${config.classify.cacheTtlSeconds}s` },
+        { key: "cache", label: t`分類結果快取 — ${onOff(config.classify.cache)}` },
+        { key: "cacheTtlSeconds", label: t`快取秒數（TTL）— ${config.classify.cacheTtlSeconds}s` },
       ];
       const fieldRow = await pickFrom(hooks, "分類快取：選欄位", fields.map((field) => field.label));
       if (fieldRow === undefined || fieldRow === null) return fieldRow;
@@ -1259,7 +1270,7 @@ async function editItem(
       if (picked === undefined || picked === null) return picked;
       if (picked === CUSTOM_OPTION) {
         const typed = await promptLoop(hooks, "分類快取秒數（TTL，整數秒）", String(current), (text) =>
-          /^\d+$/.test(text) ? null : `「${text}」不是整數秒`,
+          /^\d+$/.test(text) ? null : t`「${text}」不是整數秒`,
         );
         if (typed === undefined) return undefined;
         return classifyEdit({ cacheTtlSeconds: Number(typed) });
@@ -1270,14 +1281,14 @@ async function editItem(
     case "classifyNums": {
       type NumKey = "timeoutMs" | "confidenceThreshold" | "minPromptChars" | "historyTurns";
       const fields: ReadonlyArray<{ key: NumKey; label: string; presets: readonly number[] }> = [
-        { key: "timeoutMs", label: `分類逾時 timeoutMs — ${config.classify.timeoutMs}ms`, presets: CLASSIFY_NUM_PRESETS.timeoutMs },
+        { key: "timeoutMs", label: t`分類逾時 timeoutMs — ${config.classify.timeoutMs}ms`, presets: CLASSIFY_NUM_PRESETS.timeoutMs },
         {
           key: "confidenceThreshold",
-          label: `判斷門檻 confidenceThreshold — ${config.classify.confidenceThreshold}`,
+          label: t`判斷門檻 confidenceThreshold — ${config.classify.confidenceThreshold}`,
           presets: CLASSIFY_NUM_PRESETS.confidenceThreshold,
         },
-        { key: "minPromptChars", label: `最短字數 minPromptChars — ${config.classify.minPromptChars}`, presets: CLASSIFY_NUM_PRESETS.minPromptChars },
-        { key: "historyTurns", label: `歷史輪數 historyTurns — ${config.classify.historyTurns}`, presets: CLASSIFY_NUM_PRESETS.historyTurns },
+        { key: "minPromptChars", label: t`最短字數 minPromptChars — ${config.classify.minPromptChars}`, presets: CLASSIFY_NUM_PRESETS.minPromptChars },
+        { key: "historyTurns", label: t`歷史輪數 historyTurns — ${config.classify.historyTurns}`, presets: CLASSIFY_NUM_PRESETS.historyTurns },
       ];
       const fieldRow = await pickFrom(hooks, "分類參數：選欄位", fields.map((field) => field.label));
       if (fieldRow === undefined || fieldRow === null) return fieldRow;
@@ -1294,9 +1305,9 @@ async function editItem(
       const patch = (value: number): Partial<CompassConfig["classify"]> =>
         ({ [field.key]: value }) as Partial<CompassConfig["classify"]>;
       if (picked === CUSTOM_OPTION) {
-        const typed = await promptLoop(hooks, `${field.label.split(" — ")[0]}（數字）`, String(current), (text) => {
+        const typed = await promptLoop(hooks, t`${field.label.split(" — ")[0]}（數字）`, String(current), (text) => {
           const value = parseAmount(text);
-          return value !== null ? null : `「${text}」不是有效數字`;
+          return value !== null ? null : t`「${text}」不是有效數字`;
         });
         if (typed === undefined) return undefined;
         return classifyEdit(patch(parseAmount(typed) as number));
@@ -1307,8 +1318,8 @@ async function editItem(
     // ------------------------------------------------------------ ⑤ 政策
     case "filters": {
       const lists = [
-        `deny — 排除模型／glob（${config.deny.length}）`,
-        `allowProviders — 只放行這些 provider（${config.allowProviders.length}）`,
+        t`deny — 排除模型／glob（${config.deny.length}）`,
+        t`allowProviders — 只放行這些 provider（${config.allowProviders.length}）`,
       ];
       const listRow = await pickFrom(hooks, "過濾規則：選一份清單", lists);
       if (listRow === undefined || listRow === null) return listRow;
@@ -1334,7 +1345,7 @@ async function editItem(
           hooks,
           isDeny ? "新增 deny 模式（glob，例如 openai/*）" : "新增 provider 代號",
           "",
-          (text) => (text === "" ? "內容不能是空字串" : null),
+          (text) => (text === "" ? t("內容不能是空字串") : null),
         );
         if (typed === undefined) return undefined;
         next = dedupe([...current, typed]);
@@ -1350,11 +1361,11 @@ async function editItem(
       const tierRows = TIERS.map((tier) => {
         const own = config.ceilings[tier];
         const inherited = PROFILE_CEILINGS[config.profile][tier];
-        return `${tier}（${own !== undefined ? `自訂 ${money(own)}` : `依 profile ${money(inherited)}`}）`;
+        return t`${tier}（${own !== undefined ? t`自訂 ${money(own)}` : t`依 profile ${money(inherited)}`}）`;
       });
       const tierRow = await pickFrom(hooks, "價格天花板：選層級", tierRows);
       if (tierRow === undefined || tierRow === null) return tierRow;
-      const tier = tierRow.slice(0, tierRow.indexOf("（")) as Tier;
+      const tier = tierRow.split(/[（(]/)[0] as Tier;
 
       const numeric = dedupe(
         (["cheap", "balanced", "quality"] as Profile[])
@@ -1363,7 +1374,7 @@ async function editItem(
           .map((value) => String(value)),
       );
       const options = ["依 profile（清除自訂）", ...numeric, CUSTOM_OPTION];
-      const picked = await pickFrom(hooks, `${tier} 的天花板（$/M：input+2×output）`, options);
+      const picked = await pickFrom(hooks, t`${tier} 的天花板（$/M：input+2×output）`, options);
       if (picked === undefined || picked === null) return picked;
 
       if (picked === "依 profile（清除自訂）") {
@@ -1378,8 +1389,8 @@ async function editItem(
         };
       }
       if (picked === CUSTOM_OPTION) {
-        const typed = await promptLoop(hooks, `${tier} 天花板（$/M 數字）`, "", (text) =>
-          parseAmount(text) !== null ? null : `「${text}」不是有效數字`,
+        const typed = await promptLoop(hooks, t`${tier} 天花板（$/M 數字）`, "", (text) =>
+          parseAmount(text) !== null ? null : t`「${text}」不是有效數字`,
         );
         if (typed === undefined) return undefined;
         const value = parseAmount(typed) as number;
@@ -1399,8 +1410,8 @@ async function editItem(
 
     // ------------------------------------------------------------ ⑥ 顯示
     case "detail": {
-      const labels = (DISPLAY_DETAILS as readonly DisplayDetail[]).map((d) => `${d} — ${DETAIL_HINT[d]}`);
-      const picked = await pickFrom(hooks, `呈現密度（目前：${config.display.detail}）`, labels);
+      const labels = (DISPLAY_DETAILS as readonly DisplayDetail[]).map((d) => `${d} — ${DETAIL_HINT[d]()}`);
+      const picked = await pickFrom(hooks, t`呈現密度（目前：${config.display.detail}）`, labels);
       if (picked === undefined || picked === null) return picked;
       return displayEdit({ detail: picked.split(" — ")[0] as DisplayDetail });
     }
@@ -1453,6 +1464,12 @@ async function editItem(
       return displayEdit({ rails: picked === "開" });
     }
 
+    case "uiLang": {
+      const picked = await pickFrom(hooks, "界面語言", ["中文", "English"]);
+      if (picked === undefined || picked === null) return picked;
+      return displayEdit({ language: picked === "English" ? "en" : "zh" });
+    }
+
     // ------------------------------------------------------------ ⑦ 診斷
     case "reset": {
       const targets: ReadonlyArray<{ key: string; label: string }> = [
@@ -1460,31 +1477,31 @@ async function editItem(
         { key: "mode", label: `mode — ${config.mode}` },
         { key: "profile", label: `profile — ${config.profile}` },
         { key: "budget", label: `budget — ${money(config.budget.dailyUsd)} / ${money(config.budget.monthlyUsd)}` },
-        { key: "cache", label: `cache — ${onOff(config.cache.aware)} · 冷卻 ${config.cache.cooldownSeconds}s` },
-        { key: "kindMinimumTier", label: `kindMinimumTier — ${Object.keys(config.kindMinimumTier).length} 種` },
+        { key: "cache", label: t`cache — ${onOff(config.cache.aware)} · 冷卻 ${config.cache.cooldownSeconds}s` },
+        { key: "kindMinimumTier", label: t`kindMinimumTier — ${Object.keys(config.kindMinimumTier).length} 種` },
         { key: "freeOnly", label: `freeOnly — ${onOff(config.freeOnly)}` },
         { key: "classify", label: `classify — ${config.classify.provider} · ${config.classify.model}` },
-        { key: "deny", label: `deny — ${config.deny.length} 條` },
-        { key: "allowProviders", label: `allowProviders — ${config.allowProviders.length} 條` },
+        { key: "deny", label: t`deny — ${config.deny.length} 條` },
+        { key: "allowProviders", label: t`allowProviders — ${config.allowProviders.length} 條` },
         { key: "modelPick", label: `modelPick — ${config.modelPick}` },
         { key: "stickiness", label: `stickiness — ${onOff(config.stickiness)}` },
         { key: "autoRoutes", label: `autoRoutes — ${onOff(config.autoRoutes)}` },
         { key: "allowUnratedPicks", label: `allowUnratedPicks — ${onOff(config.allowUnratedPicks)}` },
         { key: "useDefaultModels", label: `useDefaultModels — ${onOff(config.useDefaultModels)}` },
         { key: "xpremium", label: `xpremium — ${onOff(config.xpremium.enabled)}` },
-        { key: "thinking", label: `thinking — pin ${config.thinking.pin ?? "（無）"}` },
+        { key: "thinking", label: t`thinking — pin ${config.thinking.pin ?? t("（無）")}` },
         { key: "display", label: `display — ${config.display.detail} · ${config.display.color}` },
-        { key: "prefer", label: `prefer — ${Object.keys(config.prefer).length} 層` },
-        { key: "ceilings", label: `ceilings — ${Object.keys(config.ceilings).length} 層自訂` },
-        { key: "routes", label: `routes — 全部五層回自動派生` },
-        { key: "kindModels", label: `kindModels — 全部回層級鏈` },
+        { key: "prefer", label: t`prefer — ${Object.keys(config.prefer).length} 層` },
+        { key: "ceilings", label: t`ceilings — ${Object.keys(config.ceilings).length} 層自訂` },
+        { key: "routes", label: t("routes — 全部五層回自動派生") },
+        { key: "kindModels", label: t("kindModels — 全部回層級鏈") },
       ];
       const picked = await pickFrom(hooks, "重設哪一項？（清單為白名單可寫鍵）", targets.map((t) => t.label));
       if (picked === undefined || picked === null) return picked;
       const target = targets.find((candidate) => candidate.label === picked);
       if (!target) return null;
 
-      const confirm = await pickFrom(hooks, `重設 ${target.key} 回預設？`, ["確定，重設", "取消"]);
+      const confirm = await pickFrom(hooks, t`重設 ${target.key} 回預設？`, ["確定，重設", "取消"]);
       if (confirm === undefined || confirm === null) return confirm;
       if (confirm !== "確定，重設") return undefined;
 
@@ -1524,22 +1541,22 @@ async function editItem(
     }
 
     case "chainSource": {
-      const tierRows = TIERS.map((tier) => `${tier}（${chainSummary(config.routes[tier])}）`);
+      const tierRows = TIERS.map((tier) => t`${tier}（${chainSummary(config.routes[tier])}）`);
       const tierRow = await pickFrom(hooks, "看鏈的來源：選層級", tierRows);
       if (tierRow === undefined || tierRow === null) return tierRow;
-      const tier = tierRow.slice(0, tierRow.indexOf("（")) as Tier;
+      const tier = tierRow.split(/[（(]/)[0] as Tier;
 
       const stale = staleDays();
       const lines = [
-        `${tier} 鏈（事實檔 ${factsDate()} · 自動推導 ${onOff(config.autoRoutes)} · 內建 ${onOff(config.useDefaultModels)}）`,
+        t`${tier} 鏈（事實檔 ${factsDate()} · 自動推導 ${onOff(config.autoRoutes)} · 內建 ${onOff(config.useDefaultModels)}）`,
         ...(stale === null
           ? []
-          : [`⚠ 事實檔快照已 ${stale} 天——建議跑 npm run refresh-facts（價格與模型清單會跟著更新）`]),
+          : [t`⚠ 事實檔快照已 ${stale} 天——建議跑 npm run refresh-facts（價格與模型清單會跟著更新）`]),
         ...config.routes[tier].map(
-          (target) => `  ${keyOf(target)} — ${target.explicit ? "你寫的（鎖定，不過濾）" : "自動派生／內建"}`,
+          (target) => t`  ${keyOf(target)} — ${target.explicit ? t("你寫的（鎖定，不過濾）") : t("自動派生／內建")}`,
         ),
         ...(config.prefer[tier]?.length
-          ? [`  prefer 首選 ${config.prefer[tier][0]} — 會插到鏈首（L3）`]
+          ? [t`  prefer 首選 ${config.prefer[tier][0]} — 會插到鏈首（L3）`]
           : []),
       ];
       notice(hooks, lines.join("\n"), "info");

@@ -114,6 +114,9 @@ export type DisplayField = "kind" | "demand" | "thinking" | "classify" | "budget
 /** 配色（Part 3.1 `display.color`）：`rich` 跟隨主題全彩；`mono` 只留明暗/粗細。 */
 export type DisplayColor = "rich" | "mono";
 
+/** 界面語言（Part 3.1 `display.language`）：完整英文版的切換開關。 */
+export type UiLang = "zh" | "en";
+
 /** 呈現設定（Part 10.4 視覺規格的可調部分）。 */
 export interface DisplayConfig {
   detail: DisplayDetail;
@@ -122,6 +125,7 @@ export interface DisplayConfig {
   color: DisplayColor;
   hint: boolean;
   rails: boolean;
+  language: UiLang;
 }
 
 /** display 枚舉的唯一來源（load.ts / wizard.ts 共用）。 */
@@ -136,6 +140,7 @@ export const DISPLAY_FIELDS: readonly DisplayField[] = [
   "notes",
 ];
 export const DISPLAY_COLORS: readonly DisplayColor[] = ["rich", "mono"];
+export const UI_LANGS: readonly UiLang[] = ["zh", "en"];
 
 /** display 預設（DEFAULT_CONFIG 與渲染端 fallback 共用，單一來源）。 */
 export const DISPLAY_DEFAULTS: DisplayConfig = {
@@ -145,6 +150,7 @@ export const DISPLAY_DEFAULTS: DisplayConfig = {
   color: "rich",
   hint: true,
   rails: true,
+  language: "zh",
 };
 
 /** 內建層級候選鏈（Part 3.1 `routes`；預設鏈內容見 Part 13 #7，尚未定案）。 */

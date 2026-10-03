@@ -14,6 +14,7 @@ import {
   TIERS,
   TIER_CAPABILITY_FLOOR,
   TIER_THINKING,
+  UI_LANGS,
   type CompassConfig,
   type DisplayField,
   type Target,
@@ -259,6 +260,9 @@ function applyFilePatch(
           } else if (dk === "badge" || dk === "hint" || dk === "rails") {
             if (typeof dv === "boolean") next.display[dk] = dv;
             else warnings.push(`config.json: display.${dk} must be a boolean — ignored`);
+          } else if (dk === "language") {
+            if (inSet(dv, UI_LANGS)) next.display.language = dv as CompassConfig["display"]["language"];
+            else warnings.push(`config.json: display.language must be ${UI_LANGS.join("|")} — ignored`);
           } else if (dk === "fields") {
             if (isStringArray(dv) && dv.every((f) => (DISPLAY_FIELDS as readonly string[]).includes(f))) {
               const seen = new Set<string>();
@@ -724,6 +728,7 @@ const displayCheck: Check = (v) => {
   const fields: Record<string, Check> = {
     detail: enumCheck(DISPLAY_DETAILS),
     color: enumCheck(DISPLAY_COLORS),
+    language: enumCheck(UI_LANGS),
     badge: bool,
     hint: bool,
     rails: bool,

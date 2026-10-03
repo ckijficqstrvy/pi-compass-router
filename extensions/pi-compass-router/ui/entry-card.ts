@@ -14,6 +14,7 @@ import {
   type RouteEntry,
   type Tone,
 } from "./entries.js";
+import { tl } from "./strings.js";
 import { DISPLAY_DEFAULTS, type DisplayConfig } from "../schema.js";
 
 /** 層級色階：cheap → 中性 → 強 → 昂貴（quick…xpremium 由低到高）。 */
@@ -119,9 +120,9 @@ function paintAll(segments: EntrySegment[], theme: Theme, display: DisplayConfig
 /** expand 提示。keyHint 依賴已初始化的 keybindings/theme；萬一不在 TUI 環境就退回固定字串，不讓整張卡片炸掉。 */
 function expandHint(theme: Theme, display: DisplayConfig): string {
   try {
-    return theme.fg("dim", keyHint("app.tools.expand", "for the full breakdown"));
+    return theme.fg("dim", keyHint("app.tools.expand", tl(display.language, "展開看完整明細")));
   } catch {
-    return theme.fg("dim", "(expand for the full breakdown)");
+    return theme.fg("dim", tl(display.language, "（展開看完整明細）"));
   }
 }
 
