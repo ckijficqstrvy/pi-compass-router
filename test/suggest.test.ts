@@ -5,7 +5,7 @@ import { mkdtempSync, writeFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-import { suggest } from "../extensions/pi-compass-router/suggest.js";
+import { suggest, scoresFromHistory } from "../extensions/pi-compass-router/suggest.js";
 import { DEFAULT_CONFIG } from "../extensions/pi-compass-router/schema.js";
 import type { CompassConfig } from "../extensions/pi-compass-router/schema.js";
 
@@ -45,9 +45,40 @@ function writeScores(name: string, body: unknown): string {
 
 test.after?.(() => rmSync(dir, { recursive: true, force: true }));
 
-test("an empty scoresFile returns [] without reading anything", async () => {
-  const result = await suggest(config());
+test("an empty scoresFile falls back to decision history; no history → []", async () => {
+  // 空路徑不再直接回空：改用決策日誌自動校準（2026-10-03）。空歷史 → []。
+  const result = await suggest(config(), "", { decisionsFile: join(dir, "no-decisions.jsonl") });
   assert.deepEqual(result, []);
+});
+
+test("scoresFromHistory: reverted-from loses, moved-to gains, chosen stays neutral", () => {
+  const records = [
+    { type: "route", model: "p/chosen", symbol: "→", outcome: "applied" },
+    { type: "feedback", feedback: "revert", from: "p/bad", to: "p/good" },
+    { type: "feedback", feedback: "manual-override", from: "p/bad", to: "p/good" },
+  ] as never[];
+  const scores = scoresFromHistory(records);
+  assert.ok(scores["p/good"].score > 0.5, "moved-to gains");
+  assert.ok(scores["p/bad"].score < 0.5, "reverted-from loses");
+  assert.equal(scores["p/chosen"].score, 0.5, "chosen-only is neutral");
+  assert.match(scores["p/good"].note, /history \+2\/-0/);
+});
+
+test("suggest auto-calibrates from a decisions file", async () => {
+  const good = `${DEFAULT_CONFIG.routes.standard[0].provider}/${DEFAULT_CONFIG.routes.standard[0].model}`;
+  const bad = `${DEFAULT_CONFIG.routes.quick[0].provider}/${DEFAULT_CONFIG.routes.quick[0].model}`;
+  const file = join(dir, "decisions-history.jsonl");
+  writeFileSync(
+    file,
+    [
+      JSON.stringify({ ts: "t", type: "feedback", feedback: "revert", from: bad, to: good }),
+      JSON.stringify({ ts: "t", type: "route", model: bad, symbol: "→", outcome: "applied" }),
+    ].join("\n"),
+  );
+  const result = await suggest(config(), "", { decisionsFile: file });
+  assert.ok(result.length >= 2, `both models proposed: ${JSON.stringify(result)}`);
+  assert.equal(`${result[0].target.provider}/${result[0].target.model}`, good, "preferred model ranks first");
+  assert.match(result[0].reason, /history/);
 });
 
 test("a missing scores file throws (the user asked, silence would mislead)", async () => {

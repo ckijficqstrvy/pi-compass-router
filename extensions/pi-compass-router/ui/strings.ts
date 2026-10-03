@@ -134,7 +134,7 @@ export const EN: Record<string, string> = {
   "建議分數檔（/compass suggest 的來源）": "Suggestion scores file (source for /compass suggest)",
   "分數檔路徑（JSON）": "Scores file path (JSON)",
   "路徑不能是空字串": "path cannot be empty",
-  "尚未設定建議分數檔——用 /compass-set ⑤ 指定 JSON 路徑": "no suggestion scores file yet — set the JSON path in /compass-set ⑤",
+  "沒有足夠的決策歷史或分數檔——先使用一段時間，或用 /compass-set ⑤ 指定分數檔": "not enough decision history or a scores file yet — use compass for a while, or set a scores file in /compass-set ⑤",
   "rich — 全彩（跟隨主題）": "rich — full color (follows theme)",
   "mono — 單色（只留明暗，適合截圖／淺色主題）": "mono — grayscale (brightness only; good for screenshots/light themes)",
   "expand 提示（收合行尾）": "Expand hint (on the collapsed line)",

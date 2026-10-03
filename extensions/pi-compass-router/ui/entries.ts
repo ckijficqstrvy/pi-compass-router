@@ -312,7 +312,7 @@ export function composeLines(
     }));
   }
   if (display.detail === "standard" && view.summary.length > 0) {
-    return [{ rail: "", label: "", segments: view.summary }];
+    return [{ rail: "", label: "", segments: clipSegments(view.summary, COLLAPSED_SUMMARY_MAX) }];
   }
   return [];
 }
@@ -320,6 +320,30 @@ export function composeLines(
 // ---------------------------------------------------------------------------
 // 純文字渲染（測試 / 非 TUI 端；無 ANSI）
 // ---------------------------------------------------------------------------
+
+/**
+ * 依可見字元數截斷段落串（收合摘要用）：超過 `max` 就在段內切斷並補 `…`。
+ * 展開的明細列不截斷——明細就是為了看完整。
+ */
+export function clipSegments(segments: EntrySegment[], max: number): EntrySegment[] {
+  let used = 0;
+  const out: EntrySegment[] = [];
+  for (const segment of segments) {
+    if (used >= max) break;
+    const room = max - used;
+    if (segment.text.length <= room) {
+      out.push(segment);
+      used += segment.text.length;
+    } else {
+      out.push({ ...segment, text: `${segment.text.slice(0, Math.max(0, room - 1))}…` });
+      used = max;
+    }
+  }
+  return out;
+}
+
+/** 收合摘要的長度上限（80 欄終端不因長 notes/多欄位折行）。 */
+const COLLAPSED_SUMMARY_MAX = 120;
 
 function plain(segments: EntrySegment[]): string {
   return segments.map((s) => s.text).join("");

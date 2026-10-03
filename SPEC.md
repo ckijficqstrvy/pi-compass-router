@@ -919,7 +919,9 @@ pressure = max(today÷dailyUsd, month÷monthlyUsd)
 
 **解析規則（`suggest()` 的行為契約）**：
 
-1. `suggest.scoresFile === ""` → 回 `[]`（不讀任何檔，**不當作錯誤**）。
+1. `suggest.scoresFile === ""` → **自動校準**：讀 `decisions.jsonl`（只含非內容欄位）
+   換算分數——`route`（applied/held）→ chosen +1；`feedback` 的 `from` 記負、`to` 記正；
+   `score = 0.5 + 0.5×(pos−neg)/(pos+neg+1)`。完全沒有事件 → 回 `[]`（不當作錯誤）。
 2. 檔不存在 / 非 JSON / 缺 `scores` → **throw `Error`**（與 `loadConfig`
    的 fail-open 不同：`suggest` 是使用者**主動下指令**要結果，靜默回空
    會誤導成「沒有建議」；由 `index.ts` 捕獲並在 UI 顯示錯誤訊息）。

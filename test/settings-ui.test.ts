@@ -352,3 +352,19 @@ test("runSettingsWizard skips reload when a write is rejected", async () => {
   assert.equal(reloads, 0, "a rejected write must not reload");
   assert.equal(config.mode, "notify", "config unchanged");
 });
+test("renderEntry clips the collapsed summary but never the expanded rows", () => {
+  const notes = Array.from({ length: 12 }, (_, i) => `very long note number ${i}`);
+  const entry = {
+    symbol: "→" as const,
+    tier: "standard" as const,
+    target: { provider: "p", model: "m" },
+    notes,
+  };
+  const collapsed = renderEntry(entry, { expanded: false });
+  const summaryLine = collapsed.split("\n")[1] ?? "";
+  assert.ok(summaryLine.length <= 120, `collapsed summary clipped: ${summaryLine.length}`);
+  assert.ok(summaryLine.includes("…"), "clipped marker present");
+
+  const expanded = renderEntry(entry, { expanded: true });
+  assert.ok(expanded.includes("very long note number 11"), "expanded keeps the full notes");
+});

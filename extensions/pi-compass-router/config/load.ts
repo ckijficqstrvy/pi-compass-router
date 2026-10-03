@@ -6,6 +6,7 @@ import { COMPASS_ENV_MAP, parseEnvOverrides, type EnvPatch } from "./env.js";
 import { MODEL_FACTS, factsValid, rankedFacts, sliceBands } from "../policy/facts.js";
 import { ceilingFor, filterChain, insertPrefer } from "../policy/filter.js";
 import { PATCH_SCHEMA, TOP_LEVEL_KEYS, validatePatchValue } from "./patch.js";
+import type { TSchema } from "typebox";
 import { Value } from "typebox/value";
 import {
   MODES,
@@ -111,6 +112,38 @@ function mergeTarget(base: Target[], incoming: unknown, where: string, warnings:
  * 2. **Patch 非覆寫** — 只改被指定的鍵；預設值與衍生鏈不寫回
  * 3. **寫前驗證** — 型別不符就留在前一層的值，並具名警告
  */
+/** 取 `PATCH_SCHEMA[key]` 的葉子 schema：具名子鍵、Record 的 patternProperties、或 additionalProperties。 */
+function schemaLeaf(key: string, sub: string): TSchema | undefined {
+  const schema = PATCH_SCHEMA[key] as {
+    properties?: Record<string, TSchema>;
+    patternProperties?: Record<string, TSchema>;
+    additionalProperties?: unknown;
+  };
+  if (schema.properties && sub in schema.properties) return schema.properties[sub];
+  if (schema.patternProperties) {
+    for (const [pattern, leaf] of Object.entries(schema.patternProperties)) {
+      try {
+        if (new RegExp(pattern).test(sub)) return leaf;
+      } catch {
+        // 不合法的 pattern 略過
+      }
+    }
+  }
+  const extra = schema.additionalProperties;
+  return typeof extra === "object" && extra !== null ? (extra as TSchema) : undefined;
+}
+
+/** 單一子鍵是否合 schema（寬鬆解析與嚴格驗證共用同一份定義）。 */
+function leafOk(key: string, sub: string, value: unknown): boolean {
+  const leaf = schemaLeaf(key, sub);
+  return leaf !== undefined && Value.Check(leaf, value);
+}
+
+/** 整個值是否合該鍵的 schema（物件型鍵用）。 */
+function wholeOk(key: string, value: unknown): boolean {
+  return Value.Check(PATCH_SCHEMA[key], value);
+}
+
 /**
  * 物件鍵的通用套用引擎（2026-10-03）：以 `PATCH_SCHEMA` 的葉子 schema 驗證並
  * 逐子鍵合併。先前 classify/display/budget/cache 各有一段手寫檢查，與 schema
@@ -254,8 +287,11 @@ function applyFilePatch(
           break;
         }
         for (const [kind, tier] of Object.entries(value)) {
-          if (inSet(tier, TIERS)) next.kindMinimumTier[kind] = tier as CompassConfig["kindMinimumTier"][string];
-          else warnings.push(`config.json: kindMinimumTier.${kind} must be one of ${TIERS.join("|")} — ignored`);
+          if (tier !== null && leafOk("kindMinimumTier", kind, tier)) {
+            next.kindMinimumTier[kind] = tier as CompassConfig["kindMinimumTier"][string];
+          } else {
+            warnings.push(`config.json: kindMinimumTier.${kind} must be one of ${TIERS.join("|")} — ignored`);
+          }
         }
         break;
       }
@@ -265,18 +301,18 @@ function applyFilePatch(
           break;
         }
         for (const [kind, spec] of Object.entries(value)) {
-          if (!isRecord(spec) || typeof spec.label !== "string" || !isFiniteNumber(spec.floor)) {
+          if (!isRecord(spec) || !leafOk("taskKinds", kind, spec)) {
             warnings.push(`config.json: taskKinds.${kind} needs {label: string, floor: number} — ignored`);
             continue;
           }
-          const out: TaskKindSpec = { label: spec.label, floor: spec.floor };
+          const out: TaskKindSpec = { label: spec.label as string, floor: spec.floor as number };
           if (isFiniteNumber(spec.priority)) out.priority = spec.priority;
           next.taskKinds[kind] = out;
         }
         break;
       }
       case "xpremium":
-        if (isRecord(value) && typeof value.enabled === "boolean") next.xpremium.enabled = value.enabled;
+        if (wholeOk("xpremium", value) && isRecord(value)) next.xpremium.enabled = value.enabled as boolean;
         else warnings.push("config.json: xpremium needs {enabled: boolean} — ignored");
         break;
       case "freePool":
@@ -284,8 +320,10 @@ function applyFilePatch(
           warnings.push("config.json: freePool must be an object — ignored");
           break;
         }
-        if (typeof value.enabled === "boolean") next.freePool.enabled = value.enabled;
-        if (value.models !== undefined) {
+        if (value.enabled !== undefined && leafOk("freePool", "enabled", value.enabled)) {
+          next.freePool.enabled = value.enabled as boolean;
+        }
+        if (value.models !== undefined && leafOk("freePool", "models", value.models)) {
           next.freePool.models = mergeTarget(next.freePool.models, value.models, "config.json: freePool.models", warnings);
         }
         break;
@@ -295,12 +333,12 @@ function applyFilePatch(
           break;
         }
         for (const [kind, list] of Object.entries(value)) {
-          if (isStringArray(list)) next.specialistPriority[kind] = [...list];
+          if (leafOk("specialistPriority", kind, list)) next.specialistPriority[kind] = [...(list as string[])];
           else warnings.push(`config.json: specialistPriority.${kind} must be an array of strings — ignored`);
         }
         break;
       case "suggest":
-        if (isRecord(value) && typeof value.scoresFile === "string") next.suggest.scoresFile = value.scoresFile;
+        if (wholeOk("suggest", value) && isRecord(value)) next.suggest.scoresFile = value.scoresFile as string;
         else warnings.push("config.json: suggest needs {scoresFile: string} — ignored");
         break;
       case "budget":
@@ -314,14 +352,14 @@ function applyFilePatch(
         for (const [tier, ceiling] of Object.entries(value)) {
           if (!(TIERS as readonly string[]).includes(tier)) {
             warnings.push(`config.json: ceilings.${tier} is not a known tier — ignored`);
-          } else if (ceiling === null || (isFiniteNumber(ceiling) && ceiling >= 0)) {
+          } else if (leafOk("ceilings", tier, ceiling)) {
             next.ceilings[tier as keyof CompassConfig["ceilings"]] = ceiling as number | null;
           } else warnings.push(`config.json: ceilings.${tier} must be a number >= 0 or null — ignored`);
         }
         break;
       case "deny":
       case "allowProviders":
-        if (isStringArray(value)) next[key] = [...value];
+        if (wholeOk(key, value)) next[key] = [...(value as string[])];
         else warnings.push(`config.json: ${key} must be an array of non-empty strings — ignored`);
         break;
       case "prefer":
@@ -332,8 +370,8 @@ function applyFilePatch(
         for (const [tier, list] of Object.entries(value)) {
           if (!(TIERS as readonly string[]).includes(tier)) {
             warnings.push(`config.json: prefer.${tier} is not a known tier — ignored`);
-          } else if (isStringArray(list) && list.length > 0) {
-            next.prefer[tier as keyof CompassConfig["prefer"]] = [...list];
+          } else if (list !== null && leafOk("prefer", tier, list)) {
+            next.prefer[tier as keyof CompassConfig["prefer"]] = [...(list as string[])];
           } else warnings.push(`config.json: prefer.${tier} must be a non-empty string array — ignored`);
         }
         break;
@@ -346,7 +384,7 @@ function applyFilePatch(
           break;
         }
         for (const [tk, tv] of Object.entries(value)) {
-          if (inSet(tv, THINKING_LEVELS)) next.thinking[tk] = tv as ThinkingLevel;
+          if (tv !== null && leafOk("thinking", tk, tv)) next.thinking[tk] = tv as ThinkingLevel;
           else warnings.push(`config.json: thinking.${tk} must be one of ${THINKING_LEVELS.join("|")} — ignored`);
         }
         break;

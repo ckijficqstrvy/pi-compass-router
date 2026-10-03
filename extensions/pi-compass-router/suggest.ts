@@ -1,6 +1,7 @@
-// suggest.ts — /compass suggest：從本地分數檔提議路由，不切換
-//（SPEC Part 10.1「分數檔格式」節、移植 #12）。
+// suggest.ts — /compass suggest：從本地分數檔**或決策日誌**提議路由，不切換
+//（SPEC Part 10.1「分數檔格式」節、移植 #12；決策日誌自動校準 2026-10-03）。
 import { readFileSync } from "node:fs";
+import { readDecisions, type DecisionRecord } from "./decisions.js";
 import { MODEL_FACTS, factsValid, factFor } from "./policy/facts.js";
 import { TIERS, TIER_CAPABILITY_FLOOR, type CompassConfig, type Target, type Tier } from "./schema.js";
 import { selectTargets } from "./route/select.js";
@@ -9,7 +10,7 @@ import { selectTargets } from "./route/select.js";
 export interface Suggestion {
   tier: Tier;
   target: Target;
-  /** 提議理由（來自分數檔的分數說明）。 */
+  /** 提議理由（來自分數檔的分數說明，或決策歷史的統計）。 */
   reason: string;
 }
 
@@ -31,29 +32,117 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 }
 
 /**
- * 讀取 `suggest.scoresFile`（本地分數檔）並產生各層路由提議。
+ * 決策歷史 → 分數（0–1）。
  *
- * 行為契約（SPEC Part 10.1「分數檔格式」節，2026-10-01 補定）：
+ * 訊號（全部非內容欄位）：
+ * - `type: "route"` 且 outcome 為 `applied`／`held` → 該模型 `chosen +1`；
+ * - `type: "feedback"` → `from` 記負（離開它 = 不滿意）、`to` 記正（換過去 = 偏好）。
  *
- * - `scoresFile === ""` → 回 `[]`（不讀檔，**不是錯誤**）。
- * - 檔不存在／非 JSON／缺 `scores` → **throw**（使用者主動下指令，
- *   靜默回空會誤導成「沒有建議」；由 `index.ts` 捕獲顯示）。
- * - `score` 非有限數或不在 0–1 → 跳過該筆記 `invalid score`（單筆髒資料
- *   不讓整份建議消失）。
- * - `tier` 缺省 → 依 `model-facts` 歸帶；無事實（unrated）→ 跳過記
- *   `unrated model`；`tier` 非法 → 跳過記 `unknown tier`。
+ * `score = 0.5 + 0.5 × (pos − neg) / (pos + neg + 1)`——落在 (0,1)，
+ * 無正負證據的模型回 0.5（中性）。**只給有事件的模型**。
+ */
+export function scoresFromHistory(records: readonly DecisionRecord[]): Record<string, { score: number; note: string }> {
+  const pos = new Map<string, number>();
+  const neg = new Map<string, number>();
+  const chosen = new Map<string, number>();
+  const bump = (map: Map<string, number>, key: string | null | undefined) => {
+    if (typeof key !== "string" || key === "") return;
+    map.set(key, (map.get(key) ?? 0) + 1);
+  };
+  for (const record of records) {
+    if (record.type === "route") {
+      if (record.outcome === "applied" || record.outcome === "held") bump(chosen, record.model);
+    } else {
+      bump(neg, record.from);
+      bump(pos, record.to);
+    }
+  }
+
+  const keys = new Set([...pos.keys(), ...neg.keys(), ...chosen.keys()]);
+  const out: Record<string, { score: number; note: string }> = {};
+  for (const key of keys) {
+    const p = pos.get(key) ?? 0;
+    const n = neg.get(key) ?? 0;
+    const c = chosen.get(key) ?? 0;
+    out[key] = {
+      score: 0.5 + (0.5 * (p - n)) / (p + n + 1),
+      note: `history +${p}/-${n} · chosen ${c}`,
+    };
+  }
+  return out;
+}
+
+/**
+ * 分數表 → 提議（分數檔與決策歷史共用的評估器）。
+ *
+ * - `score` 非有限數或不在 0–1 → 跳過。
+ * - `tier` 缺省 → 依 `model-facts` 歸帶；無事實（unrated）→ 跳過；
+ *   `tier` 非法 → 跳過。
  * - `target` 標 `explicit: false`（提議不是設定，不繞過 L2 過濾）。
- * - 回傳依 `score` 降序，同分依 model 字典序（穩定）。
- * - **純提議**：不寫 config、不切換。
+ * - 依 `score` 降序，同分依 model 字典序（穩定）。**純提議**。
+ */
+export function evaluateScores(
+  scoresRaw: Record<string, ScoreEntry>,
+  config: CompassConfig,
+): Suggestion[] {
+  const out: Array<Suggestion & { score: number }> = [];
+  for (const [key, value] of Object.entries(scoresRaw)) {
+    if (!isRecord(value)) continue;
+    const score = value.score;
+    if (typeof score !== "number" || !Number.isFinite(score) || score < 0 || score > 1) {
+      continue;
+    }
+    const note = typeof value.note === "string" ? value.note : undefined;
+
+    let tier: Tier;
+    if (value.tier === undefined) {
+      const derived = deriveTier(key, config);
+      if (derived === undefined) continue; // unrated → 跳過
+      tier = derived;
+    } else if (typeof value.tier === "string" && isTier(value.tier)) {
+      tier = value.tier;
+    } else {
+      continue; // unknown tier → 跳過
+    }
+
+    const target = targetFromKey(key);
+    out.push({
+      tier,
+      target,
+      reason: note ? `score ${score.toFixed(2)} · ${note}` : `score ${score.toFixed(2)}`,
+      score,
+    });
+  }
+
+  out.sort(
+    (a, b) =>
+      b.score - a.score ||
+      `${a.target.provider}/${a.target.model}`.localeCompare(`${b.target.provider}/${b.target.model}`),
+  );
+  return out.map(({ score: _score, ...suggestion }) => suggestion);
+}
+
+/**
+ * 讀取提議。來源二選一：
+ * 1. `config.suggest.scoresFile` 有值 → 讀該 JSON 檔（格式見 SPEC Part 10.1）；
+ *    檔不存在／非 JSON／缺 `scores` → **throw**（使用者主動下指令，靜默回空會誤導）。
+ * 2. 空字串 → **自動校準**：讀決策日誌（`decisions.jsonl`，只含非內容欄位）
+ *    換算分數。完全沒有事件 → 回 `[]`（不是錯誤）。
  *
- * @param scoresFile 參數存在時覆寫 `config.suggest.scoresFile`（**僅供測試**）。
+ * @param scoresFile 覆寫 `config.suggest.scoresFile`（**僅供測試**）。
+ * @param options.decisionsFile 覆寫決策日誌路徑（**僅供測試**）。
  */
 export async function suggest(
   config: CompassConfig,
   scoresFile?: string,
+  options: { decisionsFile?: string } = {},
 ): Promise<Suggestion[]> {
   const path = scoresFile ?? config.suggest.scoresFile;
-  if (path === "") return [];
+  if (path === "") {
+    const records = readDecisions(options.decisionsFile);
+    const scores = scoresFromHistory(records);
+    return evaluateScores(scores, config);
+  }
 
   let raw: string;
   try {
@@ -71,43 +160,7 @@ export async function suggest(
   if (!isRecord(parsed) || !isRecord(parsed.scores)) {
     throw new Error(`suggest: scores file ${path} must be an object with a "scores" map`);
   }
-
-  const out: Array<Suggestion & { score: number }> = [];
-  for (const [key, value] of Object.entries(parsed.scores as Record<string, ScoreEntry>)) {
-    if (!isRecord(value)) continue;
-    const score = value.score;
-    if (typeof score !== "number" || !Number.isFinite(score) || score < 0 || score > 1) {
-      continue; // invalid score → 跳過（規格第 3 點）
-    }
-    const note = typeof value.note === "string" ? value.note : undefined;
-
-    let tier: Tier;
-    if (value.tier === undefined) {
-      const derived = deriveTier(key, config);
-      if (derived === undefined) continue; // unrated → 跳過（第 4 點）
-      tier = derived;
-    } else if (typeof value.tier === "string" && isTier(value.tier)) {
-      tier = value.tier;
-    } else {
-      continue; // unknown tier → 跳過（第 5 點）
-    }
-
-    const target = targetFromKey(key);
-    out.push({
-      tier,
-      target,
-      reason: note ? `score ${score.toFixed(2)} · ${note}` : `score ${score.toFixed(2)}`,
-      score,
-    });
-  }
-
-  // 依 score 降序（最推薦在前），同分依 model 字典序穩定排序（第 7 點）。
-  out.sort(
-    (a, b) =>
-      b.score - a.score ||
-      `${a.target.provider}/${a.target.model}`.localeCompare(`${b.target.provider}/${b.target.model}`),
-  );
-  return out.map(({ score: _score, ...suggestion }) => suggestion);
+  return evaluateScores(parsed.scores as Record<string, ScoreEntry>, config);
 }
 
 /** key → Tier：用事實檔的 capability 與 profile 價格帶歸帶（經 Stage 3 選鏈）。 */

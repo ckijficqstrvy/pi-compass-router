@@ -6,7 +6,7 @@
 //
 // 預設開啟（2026-10-03 使用者拍板），可用 config `decisionLog: false` 關閉；
 // 永久 best-effort：任何寫入失敗都吞掉，絕不影響回合。
-import { appendFileSync, mkdirSync } from "node:fs";
+import { appendFileSync, mkdirSync, readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 
@@ -48,4 +48,27 @@ export function appendDecision(record: DecisionRecord, file: string = DECISIONS_
   } catch {
     // 記日誌是 best-effort：寫不進去也不打斷回合。
   }
+}
+
+/** 讀決策日誌（best-effort）：檔案不存在或個別行壞掉都跳過，永不 throw。 */
+export function readDecisions(file: string = DECISIONS_FILE): DecisionRecord[] {
+  let raw: string;
+  try {
+    raw = readFileSync(file, "utf8");
+  } catch {
+    return [];
+  }
+  const out: DecisionRecord[] = [];
+  for (const line of raw.split("\n")) {
+    if (line.trim() === "") continue;
+    try {
+      const parsed: unknown = JSON.parse(line);
+      if (typeof parsed === "object" && parsed !== null && "type" in parsed) {
+        out.push(parsed as DecisionRecord);
+      }
+    } catch {
+      // 壞行跳過
+    }
+  }
+  return out;
 }
