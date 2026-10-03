@@ -18,7 +18,7 @@ import { reloadClassifier } from "./classify/lifecycle.js";
 import type { Classifier, Judgment } from "./classify/types.js";
 import { type RouteEntry } from "./ui/entries.js";
 import { renderEntryCard } from "./ui/entry-card.js";
-import { setLang, t } from "./ui/strings.js";
+import { tr, tl } from "./ui/strings.js";
 import { suggest } from "./suggest.js";
 import { runSettingsWizard, factsAgeDays, type CandidateKind, type WizardHooks } from "./ui/wizard.js";
 import { MODEL_FACTS } from "./policy/facts.js";
@@ -44,10 +44,7 @@ interface SessionState {
 
 /** 追蹤 session 狀態（工廠不啟動行程，狀態在 session_start 填）。 */
 function createState(): SessionState {
-  const state = { config: loadConfig().config, switches: 0 };
-  // 命令描述在註冊時定案，先照設定切好語言（之後 reloadConfig 會再同步）。
-  setLang(state.config.display.language);
-  return state;
+  return { config: loadConfig().config, switches: 0 };
 }
 
 /** 當前模型 → Target 形狀（`provider/id` + 推導層級，供 guard stickiness/deadband）。 */
@@ -240,7 +237,6 @@ function reloadConfig(state: SessionState): CompassConfig {
     if (config.classify.provider === "cloud") return createCloudClassifier(config);
     return undefined; // 未知後端：不建分類器（路由走 tier 預設，fail-open）
   });
-  setLang(state.config.display.language);
   return state.config;
 }
 /**
@@ -289,8 +285,9 @@ export default function compass(pi: ExtensionAPI): void {
 
 /** `/compass` 與其子命令（Part 10.1）。 */
 function registerCommands(pi: ExtensionAPI, state: SessionState): void {
+  const descLang = state.config.display.language;
   pi.registerCommand("compass", {
-    description: t("compass 狀態 / on|off / mode / budget / why / revert / suggest / refresh-facts"),
+    description: tl(descLang, "compass 狀態 / on|off / mode / budget / why / revert / suggest / refresh-facts"),
     handler: async (args, ctx) => {
       const [sub, ...rest] = args.trim().split(/\s+/);
       switch (sub) {
@@ -334,7 +331,7 @@ function registerCommands(pi: ExtensionAPI, state: SessionState): void {
   });
 
   pi.registerCommand("compass-set", {
-    description: t("/compass-set 設定選單（寫 config.json + 時間戳備份）"),
+    description: tl(descLang, "/compass-set 設定選單（寫 config.json + 時間戳備份）"),
     handler: async (_args, ctx) => {
       const hooks: WizardHooks = {
         write: (key, value) => writeConfigPatch({ [key]: value }),
@@ -346,17 +343,18 @@ function registerCommands(pi: ExtensionAPI, state: SessionState): void {
         // 測試分類器：跑一輪真分類（不切換），回一列結果供「重設・診斷」顯示。
         probeClassifier: async () => {
           const classifier = state.classifier;
-          if (!classifier) return t("沒有分類器（backend 未啟用）");
+          const lang = state.config.display.language;
+          if (!classifier) return tl(lang, "沒有分類器（backend 未啟用）");
           const started = Date.now();
           try {
             const judgment = await classifier.classify(
-              { request: t("回一個字就好"), kinds: kindsOf(state.config) },
+              { request: tl(lang, "回一個字就好"), kinds: kindsOf(state.config) },
               AbortSignal.timeout(8000),
             );
             const ms = Date.now() - started;
             return `${classifier.id} ${ms}ms · kind ${judgment.kind} ${Math.round(judgment.kindConfidence * 100)}% · cache ${judgment.cacheHit ? "hit" : "miss"}`;
           } catch (error) {
-            return t`分類失敗：${error instanceof Error ? error.message : String(error)}`;
+            return tr(lang)`分類失敗：${error instanceof Error ? error.message : String(error)}`;
           }
         },
         // 候選來源（選單純資料，I/O 全在這裡）：失敗一律回空 → 該項退回打字。
@@ -384,7 +382,7 @@ function registerCommands(pi: ExtensionAPI, state: SessionState): void {
   });
 
   pi.registerCommand("compass-route", {
-    description: t("/compass-route <text> 分類任意文字並顯示建議（不切換）"),
+    description: tl(descLang, "/compass-route <text> 分類任意文字並顯示建議（不切換）"),
     handler: async (args, ctx) => {
       if (!args.trim()) return ctx.ui.notify("compass-route: expected some text", "warning");
       const composed = compose(undefined, state.config);

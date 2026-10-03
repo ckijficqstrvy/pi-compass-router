@@ -1,5 +1,5 @@
 // ui/wizard/edit.ts — 逐項編輯（回傳要寫入的 key/value 與如何在活設定上套用）。
-import { t, rawOf } from "../strings.js";
+import { t, rawOf } from "./i18n.js";
 import { DEFAULT_CONFIG, PROFILE_CEILINGS, THINKING_LEVELS, TIERS } from "../../schema.js";
 import type { CompassConfig, Profile, Target, ThinkingLevel, Tier, Mode } from "../../schema.js";
 import { DISPLAY_DETAILS, DISPLAY_FIELDS } from "../../schema.js";

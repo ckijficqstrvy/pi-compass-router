@@ -10,7 +10,7 @@ import type {
   ThinkingLevel,
   Tier,
 } from "../../schema.js";
-import { t } from "../strings.js";
+import { t } from "./i18n.js";
 
 // 值 ↔ 標籤（Part 10.2 helper 白名單 + 2026-10-02 新增）
 // ---------------------------------------------------------------------------

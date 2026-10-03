@@ -1,5 +1,5 @@
 // ui/wizard/items.ts — 選單結構（組/項目）與列渲染、列認列。
-import { t } from "../strings.js";
+import { t } from "./i18n.js";
 import { DISPLAY_FIELDS, TIERS, type CompassConfig } from "../../schema.js";
 import {
   chainSummary,

@@ -10,7 +10,8 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 
-import { EN, setLang, t, langOf } from "../extensions/pi-compass-router/ui/strings.js";
+import { EN, tl, tr, rawOf } from "../extensions/pi-compass-router/ui/strings.js";
+import { setLang, t, currentLang } from "../extensions/pi-compass-router/ui/wizard/i18n.js";
 import { runSettingsWizard } from "../extensions/pi-compass-router/ui/wizard.js";
 import { renderEntryCard } from "../extensions/pi-compass-router/ui/entry-card.js";
 import { DEFAULT_CONFIG } from "../extensions/pi-compass-router/schema.js";
@@ -20,7 +21,11 @@ import type { WizardHooks } from "../extensions/pi-compass-router/ui/wizard.js";
 const HAN = /[\u4e00-\u9fff]/;
 // 測試 bundle 後落在 build/test/，原始碼在 repo 根：用 cwd（npm test 由 repo 根執行）。
 const SRC = [
-  join(process.cwd(), "extensions/pi-compass-router/ui/wizard.ts"),
+  join(process.cwd(), "extensions/pi-compass-router/ui/wizard/labels.ts"),
+  join(process.cwd(), "extensions/pi-compass-router/ui/wizard/items.ts"),
+  join(process.cwd(), "extensions/pi-compass-router/ui/wizard/edit.ts"),
+  join(process.cwd(), "extensions/pi-compass-router/ui/wizard/run.ts"),
+  join(process.cwd(), "extensions/pi-compass-router/ui/wizard/i18n.ts"),
   join(process.cwd(), "extensions/pi-compass-router/ui/entry-card.ts"),
   join(process.cwd(), "extensions/pi-compass-router/index.ts"),
 ];
@@ -174,7 +179,8 @@ function scanLiterals(src: string): Found[] {
       }
       spans.push(cur);
       const norm = spans.join("${}");
-      const tagged = prev === "t";
+      const prefix = src.slice(Math.max(0, i - 40), i);
+      const tagged = prev === "t" || /(?:^|[^A-Za-z0-9_$])tr\([^()]*\)\s*$/.test(prefix);
       if (HAN.test(spans.join("")) || HAN.test(norm)) {
         out.push({ key: norm, kind: tagged ? "tag" : "template", wrapped: tagged });
       }
@@ -287,17 +293,23 @@ test("en-mode entry card renders no CJK (including the expand hint)", () => {
   assert.deepEqual(leaked, [], "en entry card leaked Chinese");
 });
 
-test("t() is identity in zh and translates in en; rawOf round-trips fixed keys", async () => {
-  const { rawOf } = await import("../extensions/pi-compass-router/ui/strings.js");
+test("tl/tr are identity in zh and translate in en; rawOf round-trips fixed keys", () => {
+  assert.equal(tl("zh", "開"), "開");
+  assert.equal(tl("en", "開"), "On");
+  assert.equal(rawOf("On", "en"), "開");
+  assert.equal(rawOf("開", "zh"), "開");
+  const zh = tr("zh");
+  const en = tr("en");
+  assert.equal(zh`已寫入 ${"x"}`, "已寫入 x");
+  assert.equal(en`已寫入 ${"y"}`, "saved y");
+});
+
+test("the wizard language context is set and restored (no cross-module global)", () => {
+  setLang("en");
+  assert.equal(currentLang(), "en");
+  assert.equal(t("開"), "On");
   setLang("zh");
   assert.equal(t("開"), "開");
-  assert.equal(t`已寫入 ${"x"}`, "已寫入 x");
-  setLang("en");
-  assert.equal(t("開"), "On");
-  assert.equal(t`已寫入 ${"x"}`, "saved x");
-  assert.equal(rawOf("On"), "開");
-  assert.equal(langOf(), "en");
-  setLang("zh");
 });
 
 test("EN translations of hole-free keys are unique (rawOf reverse map is unambiguous)", () => {

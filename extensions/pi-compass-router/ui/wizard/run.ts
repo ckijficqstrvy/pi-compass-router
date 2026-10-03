@@ -1,5 +1,5 @@
 // ui/wizard/run.ts — 選單主迴圈（TUI 顯示與落檔全交給 hooks）。
-import { t, setLang } from "../strings.js";
+import { t, setLang } from "./i18n.js";
 import type { CompassConfig } from "../../schema.js";
 import type { WizardHooks } from "./types.js";
 import { GROUP_ITEMS, GROUPS, groupName, groupOf, itemOf, renderGroupRow, renderItemRow, BACK_OPTION, DONE_OPTION, MENU_LABEL } from "./items.js";

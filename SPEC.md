@@ -1161,9 +1161,17 @@ export function writeConfigPatch(patch: Record<string, unknown>, filePath = CONF
 使用者可見字串以 zh 原文為鍵，顯示時經 `t()``（純字串）或標籤模板
 `` t`已寫入 ${key}` ``；en 模式查 `EN` 表、**缺漏回原文**，不會壞。
 選單/提示在 hooks 邊界集中翻譯（`pickFrom` 顯示翻譯、`rawOf` 把固定項
-翻回原文鍵，比較點維持原文）；entry 卡片的提示走 `tl(display.language, …)`
-不依全域狀態。完整性由 `test/i18n.test.ts` 三層把關：每個 `t()` 鍵都有 EN、
-含漢字的模板必須經 `` t `` 包裝、en 模式跑一輪 wizard + entry 不得出現 CJK。
+翻回原文鍵，比較點維持原文）；entry 卡片的提示走 `tl(display.language, …)`。
+完整性由 `test/i18n.test.ts` 三層把關：每個 `t()` 鍵都有 EN、
+含漢字的模板必須經 `` t `` 或 `tr(lang)` 包裝、en 模式跑一輪 wizard + entry
+不得出現 CJK。
+
+> **語言狀態（2026-10-03 收斂）**：`ui/strings.ts` 是**無狀態**的（`tl`/`tr`
+> 帶語言呼叫）；wizard 執行期的語言脈絡只存在於 `ui/wizard/i18n.ts`
+> （`setLang`/`t`，由 `runSettingsWizard` 在每輪重繪前設定），
+> 不再有跨模組的 ambient 語言——index.ts 的命令描述與 entry 卡片都
+> 明確傳語言。
+
 命令描述（`registerCommand` 的 description）在**註冊時**定案，切換語言後
 要重開 session 才會跟進；選單與訊息則即時。
 

@@ -1,30 +1,19 @@
-// ui/strings.ts — 界面字串（gettext 式，Part 3.1 `display.language`）。
+// ui/strings.ts — 界面字串字典（gettext 式，Part 3.1 `display.language`）。
 //
-// 用法：所有**使用者可見**字串以 zh 原文為鍵，顯示時經 `t()`：
-//   - 純字串：`t("開")`
-//   - 帶插值：標籤模板 `` t`已寫入 ${key}` ``（鍵 = 原文、洞以 `${}` 佔位）
-// zh 模式原樣回傳（零改動、測試不斷）；en 模式查 `EN` 表，**缺漏回原文**
-// （最糟也只是沒翻，不會壞）。
+// **無狀態**：本層不持有「目前語言」。呼叫端自行帶語言：
+//   - `tl(lang, "開")` / `tr(lang)\`已寫入 ${key}\`` — 明確指定（共用層用）
+//   - wizard 執行期用 `ui/wizard/i18n.ts` 的 `t`/`setLang` 脈絡（收斂在該子系統）
 //
-// 完整性由 `test/i18n.test.ts` 掃描保證：每個 t() 鍵都必須有 EN 翻譯。
-// 模組層常數（CUSTOM_OPTION 等）**保持 raw zh**，在使用處才 t()——避免
-// 匯入時凍結語言。
+// 所有**使用者可見**字串以 zh 原文為鍵：zh 模式原樣回傳；en 模式查 `EN` 表、
+// **缺漏回原文**（最糟只是沒翻，不會壞）。
+//
+// 完整性由 `test/i18n.test.ts` 掃描保證：每個翻譯鍵都必須有 EN。
+// 模組層常數（CUSTOM_OPTION 等）**保持 raw zh**，在使用處才翻譯——
+// 避免匯入時凍結語言。
 import type { UiLang } from "../schema.js";
 
 /** 標籤模板的洞在鍵/譯文中的佔位符。 */
 const HOLE = "${}";
-
-let current: UiLang = "zh";
-
-/** 設定目前界面語言（`runSettingsWizard` 迴圈頂與 session 啟動時呼叫）。 */
-export function setLang(lang: UiLang): void {
-  current = lang;
-}
-
-/** 目前界面語言。 */
-export function langOf(): UiLang {
-  return current;
-}
 
 /** zh 原文 → English。鍵含 `${}` 佔位者依序替換參數。 */
 export const EN: Record<string, string> = {
@@ -318,30 +307,26 @@ function reverse(): Map<string, string> {
  * （CUSTOM_OPTION、動作選項、「開」等）自動翻回，**比較點維持原文**；
  * 含洞的組合字串（欄位列等）查不到就原樣回傳，由呼叫端以同一變數比對。
  */
-export function rawOf(displayed: string): string {
-  if (current === "zh") return displayed;
+export function rawOf(displayed: string, lang: UiLang): string {
+  if (lang === "zh") return displayed;
   return reverse().get(displayed) ?? displayed;
 }
 
 /**
- * 翻譯一則字串。兩種呼叫：
- *   `t("開")` — 純字串；
- *   `` t`已寫入 ${key}` `` — 標籤模板（鍵 = 字面跨度以 `${}` 串接）。
- */
-export function t(literals: string, ...values: unknown[]): string;
-export function t(literals: TemplateStringsArray, ...values: unknown[]): string;
-export function t(literals: string | TemplateStringsArray, ...values: unknown[]): string {
-  return translate(current, literals, values);
-}
-
-/**
- * 同上，但**指定語言**（不依全域 `setLang`）——給渲染端用（例如 entry 卡片
- * 依 `display.language` 出提示，不因 wizard 或其他呼叫而漂移）。
+ * 翻譯一則字串（**無狀態**：語言由呼叫端明確帶入，或由 wizard/i18n.ts 的
+ * 執行期脈絡提供）。
  */
 export function tl(lang: UiLang, literals: string, ...values: unknown[]): string;
 export function tl(lang: UiLang, literals: TemplateStringsArray, ...values: unknown[]): string;
 export function tl(lang: UiLang, literals: string | TemplateStringsArray, ...values: unknown[]): string {
   return translate(lang, literals, values);
+}
+
+/** 固定語言的標籤模板翻譯器：`const s = tr(lang); s(\"開\"); s\`… ${x} …\``。 */
+export type Tr = (literals: string | TemplateStringsArray, ...values: unknown[]) => string;
+export function tr(lang: UiLang): Tr {
+  return ((literals: string | TemplateStringsArray, ...values: unknown[]) =>
+    translate(lang, literals, values)) as Tr;
 }
 
 function translate(

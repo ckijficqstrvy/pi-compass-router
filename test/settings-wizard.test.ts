@@ -26,7 +26,7 @@ import {
   type WizardHooks,
 } from "../extensions/pi-compass-router/ui/wizard.js";
 import { cloudClassifierKeys, localCheckpoints, openRouterModelKeys } from "../extensions/pi-compass-router/ui/sources.js";
-import { setLang } from "../extensions/pi-compass-router/ui/strings.js";
+import { setLang } from "../extensions/pi-compass-router/ui/wizard/i18n.js";
 import { DEFAULT_CONFIG, TIERS } from "../extensions/pi-compass-router/schema.js";
 import type { CompassConfig, ThinkingLevel } from "../extensions/pi-compass-router/schema.js";
 
