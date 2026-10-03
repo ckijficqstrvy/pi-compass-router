@@ -769,6 +769,14 @@ batched independently，batch_size 預設 16），故五題成本接近一題而
 - entry 記 `cache miss ≈ $X`；`/compass status` 顯示
   `switches: N · cache miss ≈ $Y`
 
+> **實作位置（2026-10-03 補）**：估算與 Stage 2–4 的編排都在
+> `route/plan.ts`（純函式）：contextTokens 來自 `ctx.getContextUsage()`，
+> 費率來自 `ctx.model.cost` / registry 的 `Model.cost`（USD/每百萬 token，
+> 與 pi 的 `usage.cost` 同單位）。`currentTier` 由 `select.tierOfModel`
+> 依事實檔價格帶推導；`lastSwitchAtMs` 由 `index.ts` 在真的切換時記錄。
+> 這三條輸入先前從未供給，導致 deadband/cooldown/cache penalty 空轉
+> （2026-10-03 修正，`test/plan.test.ts` 把這三條規則第一次真的測起來）。
+
 ---
 
 ## Part 8 — 預算
@@ -1180,6 +1188,7 @@ pi-compass/
 │   │   ├── cloud.ts          # cloud 後端（可替換 provider）
 │   │   └── server.py         # laya JSONL stdio
 │   ├── route/
+│   │   ├── plan.ts           # Stage 2–4 純編排（可測；2026-10-03 新增）
 │   │   ├── compose.ts        # Stage 2：demand / tier / thinking
 │   │   ├── select.ts         # Stage 3：專家 → 層級 → 池
 │   │   ├── guard.ts          # Stage 4：budget / cache / cooldown

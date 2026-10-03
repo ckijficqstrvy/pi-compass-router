@@ -230,3 +230,22 @@ export function selectTargets(
 
   return { chain, notes };
 }
+
+/**
+ * 推導某模型目前所屬的層級（供應 Stage 4 的 deadband / cooldown / bypass 使用）。
+ *
+ * 以事實檔的 blended 價格對照目前 profile 的層級上限：回「第一個容得下它的
+ * 層級」（cheap→…→premium）。這比「上次路由到的層級」稳——使用者手動換模型
+ * 時也不會拿到隊舊資料；沒事實、沒價格 → `null`（guard 遇 null 會跳過規則，不猜）。
+ */
+export function tierOfModel(config: CompassConfig, provider: string, model: string): Tier | null {
+  const fact = provider ? factFor(provider, model) : factFor("", model);
+  if (!fact || fact.price === undefined) return null;
+  const price = blendedOf(fact.price);
+  for (const tier of TIER_ORDER) {
+    if (tier === "xpremium" && !config.xpremium.enabled) continue;
+    const ceiling = ceilingFor(config, tier);
+    if (ceiling === null || price <= ceiling) return tier;
+  }
+  return null;
+}

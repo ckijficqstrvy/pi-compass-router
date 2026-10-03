@@ -7,9 +7,9 @@ import { Type } from "typebox";
 
 import { loadConfig, validatePatch, writeConfigPatch } from "./config/load.js";
 import { loadSpend } from "./budget.js";
+import { planTurn, type CostRates } from "./route/plan.js";
 import { compose } from "./route/compose.js";
-import { selectTargets, menuKeys, targetKey } from "./route/select.js";
-import { guard, type GuardState } from "./route/guard.js";
+import { selectTargets, menuKeys, targetKey, tierOfModel } from "./route/select.js";
 import { applyRoute, type ApplyHooks } from "./route/apply.js";
 import { createLayaClassifier } from "./classify/laya.js";
 import { createCloudClassifier } from "./classify/cloud.js";
@@ -29,6 +29,10 @@ interface SessionState {
   classifier?: Classifier;
   /** 上一次 auto-switch 之前的模型，供 `/compass revert`（Part 10.1）。 */
   previousModel?: string;
+  /** 本 session 上次真的切換模型的時間（cooldown 用，Part 7）。 */
+  lastSwitchAtMs?: number;
+  /** 最近一次估的 prompt-cache miss 成本（`/compass` 顯示，Part 7）。 */
+  lastCacheMissUsd?: number;
   /** 本次 session 的切換次數（`/compass status` 的 `switches: N`）。 */
   switches: number;
 }
@@ -41,11 +45,19 @@ function createState(): SessionState {
   return state;
 }
 
-/** 當前模型 → Target 形狀（`provider/id`，供 guard stickiness 比對）。 */
-function currentTarget(ctx: ExtensionContext): { model: string; tier: Tier | null } | null {
+/** 當前模型 → Target 形狀（`provider/id` + 推導層級，供 guard stickiness/deadband）。 */
+function currentTarget(ctx: ExtensionContext, config: CompassConfig): { model: string; tier: Tier | null } | null {
   const model = ctx.model;
   if (!model) return null;
-  return { model: `${model.provider}/${model.id}`, tier: null };
+  return { model: `${model.provider}/${model.id}`, tier: tierOfModel(config, model.provider, model.id) };
+}
+
+/** pi 模型 → 費率三件組（USD/每百萬 token）；缺欄位或型別不符回 null（不猜）。 */
+function costRatesOf(model: ReturnType<typeof resolveModel>): CostRates | null {
+  if (!model) return null;
+  const cost = model.cost as { input?: number; cacheRead?: number; cacheWrite?: number } | undefined;
+  if (!cost || typeof cost.input !== "number") return null;
+  return { input: cost.input, cacheRead: cost.cacheRead ?? 0, cacheWrite: cost.cacheWrite ?? 0 };
 }
 
 /** 解析 Target → pi Model；找不到回 undefined（可用性，Stage 4 實作契約第 1 點）。 */
@@ -93,52 +105,43 @@ async function routeTurn(
     }
   }
 
-  // Stage 2 — compose。
-  const composed = compose(judgment, config);
+  // Stage 2–4 — 純編排（route/plan.ts）：compose → select → 可用性 → cache → guard。
+  // 環境快照全部來自這裡（含 currentTier / lastSwitchAtMs / contextTokens /
+  // 費率）——這正是 2026-10-03 前缺失、使 cache/cooldown 空轉的那段接線。
+  const current = currentTarget(ctx, config);
+  const spend = loadSpend();
+  const plan = planTurn(
+    judgment,
+    config,
+    {
+      currentModel: current?.model ?? null,
+      currentTier: current?.tier ?? null,
+      lastSwitchAtMs: state.lastSwitchAtMs ?? null,
+      contextTokens: ctx.getContextUsage?.()?.tokens ?? null,
+      currentCost: costRatesOf(ctx.model),
+      todayUsd: spend.todayUsd,
+      monthUsd: spend.monthUsd,
+    },
+    {
+      isAvailable: (candidate) => resolveModel(ctx, candidate) !== undefined,
+      costOf: (candidate) => costRatesOf(resolveModel(ctx, candidate)),
+    },
+  );
 
-  // Stage 3 — select（picked 頂置）。
-  const selected = selectTargets(composed.tier, judgment, config);
-
-  // 可用性回退（Stage 4 實作契約第 1 點）：逐個試到第一個可用模型。
-  let chosen: Target | undefined = selected.picked;
-  let available: Target | undefined = chosen ? resolveModel(ctx, chosen) && chosen : undefined;
-  if (!available) {
-    for (const candidate of selected.chain) {
-      if (resolveModel(ctx, candidate)) {
-        available = candidate;
-        break;
-      }
-    }
-  }
-  if (!available) {
+  if (plan.unavailable || !plan.target || !plan.guard) {
     writeEntry(pi, {
       symbol: "×",
-      tier: composed.tier,
+      tier: plan.composed.tier,
       target: null,
       reason: "no route available",
-      notes: selected.notes,
+      notes: plan.notes,
     });
     return;
   }
 
-  // Stage 4 — guard。
-  const current = currentTarget(ctx);
-  const spend = loadSpend();
-  const state4: GuardState = {
-    currentModel: current?.model ?? null,
-    currentTier: null,
-    todayUsd: spend.todayUsd,
-    monthUsd: spend.monthUsd,
-    lastSwitchAtMs: null,
-    // cachePenaltyUsd 需要 context token 與費率——呼叫端有價格時才算（Part 7）；
-    // 此處未提供 → 跳過 cache 這步（價格未知不擋切換）。
-  };
-  const result = guard(
-    { target: available, tier: composed.tier, demand: composed.demand },
-    state4,
-    config,
-    config.mode,
-  );
+  const available = plan.target;
+  const result = plan.guard;
+  if (plan.cacheMissUsd !== undefined) state.lastCacheMissUsd = plan.cacheMissUsd;
 
   // Stage 5 — apply（hooks 接 pi / ctx）。
   const hooks = buildHooks(pi, ctx);
@@ -146,15 +149,16 @@ async function routeTurn(
     {
       outcome: result.outcome,
       target: available,
-      thinking: composed.thinking,
+      thinking: plan.composed.thinking,
       mode: config.mode,
       tier: result.tier,
       reason: result.reason,
       classify: judgment
         ? { source: judgment.source, latencyMs: judgment.latencyMs, hit: judgment.cacheHit ?? false }
         : { source: "fallback", latencyMs: 0, hit: false },
-      demand: composed.demand,
-      notes: selected.notes,
+      demand: plan.composed.demand,
+      notes: plan.notes,
+      cacheMissUsd: plan.cacheMissUsd,
     },
     hooks,
   );
@@ -164,13 +168,24 @@ async function routeTurn(
     const yes = await ctx.ui.confirm("Switch model?", `${available.provider}/${available.model} for this turn`);
     if (yes) {
       const applied = await applyRoute(
-        { outcome: "applied", target: available, thinking: composed.thinking, mode: "auto", tier: result.tier },
+        {
+          outcome: "applied",
+          target: available,
+          thinking: plan.composed.thinking,
+          mode: "auto",
+          tier: result.tier,
+          cacheMissUsd: plan.cacheMissUsd,
+        },
         hooks,
       );
-      if (applied.applied) state.switches += 1;
+      if (applied.applied) {
+        state.switches += 1;
+        state.lastSwitchAtMs = Date.now();
+      }
     }
   } else if (outcome.applied) {
     state.switches += 1;
+    state.lastSwitchAtMs = Date.now();
   }
   if (outcome.applied && state.config.mode === "auto") {
     state.previousModel = current?.model;
@@ -369,9 +384,10 @@ async function showStatus(ctx: ExtensionContext, state: SessionState, why = fals
     state.config.budget.monthlyUsd ? spend.monthUsd / state.config.budget.monthlyUsd : 0,
   );
   const current = ctx.model ? `${ctx.model.provider}/${ctx.model.id}` : "(none)";
+  const cacheMiss = state.lastCacheMissUsd === undefined ? "" : ` · cache miss ≈ $${state.lastCacheMissUsd.toFixed(3)}`;
   const lines = [
     `compass:${state.config.enabled ? "on" : "off"} · $${spend.todayUsd.toFixed(2)} today · ${Math.round(pressure * 100)}% · ${state.config.mode}`,
-    `model ${current} · switches ${state.switches} · profile ${state.config.profile}`,
+    `model ${current} · switches ${state.switches}${cacheMiss} · profile ${state.config.profile}`,
     `routes quick[${state.config.routes.quick.length}] standard[${state.config.routes.standard.length}] high[${state.config.routes.high.length}]`,
   ];
   if (why) lines.push(`classify ${state.config.classify.provider} · timeout ${state.config.classify.timeoutMs}ms`);

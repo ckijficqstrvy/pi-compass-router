@@ -31,6 +31,8 @@ export interface ApplyDecision {
   classify?: { source: string; latencyMs: number; hit: boolean };
   /** composed demand（entry 展開欄）。 */
   demand?: number;
+  /** 估算的 prompt-cache miss 成本（USD，Part 7）；未知不寫。 */
+  cacheMissUsd?: number;
   /** menu gate 拒絕 notes。 */
   notes?: string[];
   /** 未路由原因（continuation / no route available）。 */
@@ -95,6 +97,7 @@ export async function applyRoute(
     thinking: { resolved: thinking },
   };
   if (decision.notes && decision.notes.length > 0) entry.notes = decision.notes;
+  if (decision.cacheMissUsd !== undefined) entry.cacheMissUsd = decision.cacheMissUsd;
 
   const wantsModel = outcome === "applied" && mode === "auto"; // confirm 已在上方提前回傳
   const wantsThinking =
