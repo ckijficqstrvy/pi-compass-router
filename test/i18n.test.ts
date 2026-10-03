@@ -299,3 +299,17 @@ test("t() is identity in zh and translates in en; rawOf round-trips fixed keys",
   assert.equal(langOf(), "en");
   setLang("zh");
 });
+
+test("EN translations of hole-free keys are unique (rawOf reverse map is unambiguous)", () => {
+  // rawOf() 用「EN 值 → zh 原文」反向查表來把固定選項翻回原文鍵；
+  // 若兩個無洞的鍵譯成同一句，後者會被覆蓋，rawOf 可能回錯鍵。
+  const seen = new Map<string, string>();
+  const collisions: string[] = [];
+  for (const [key, value] of Object.entries(EN)) {
+    if (key.includes("${}")) continue; // 含洞的鍵不進反向表
+    const previous = seen.get(value);
+    if (previous !== undefined && previous !== key) collisions.push(`${JSON.stringify(previous)} & ${JSON.stringify(key)} → ${JSON.stringify(value)}`);
+    else seen.set(value, key);
+  }
+  assert.deepEqual(collisions, [], "hole-free EN translations must be unique");
+});
