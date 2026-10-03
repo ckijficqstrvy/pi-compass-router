@@ -72,15 +72,18 @@ function currentTarget(ctx: ExtensionContext, config: CompassConfig): { model: s
 /** pi 模型 → 費率三件組（USD/每百萬 token）；缺欄位或型別不符回 null（不猜）。 */
 function costRatesOf(model: ReturnType<typeof resolveModel>): CostRates | null {
   if (!model) return null;
-  const cost = model.cost as { input?: number; cacheRead?: number; cacheWrite?: number } | undefined;
+  const cost = model.cost as { input?: number; output?: number; cacheRead?: number; cacheWrite?: number } | undefined;
   if (!cost || typeof cost.input !== "number") return null;
-  return { input: cost.input, cacheRead: cost.cacheRead ?? 0, cacheWrite: cost.cacheWrite ?? 0 };
+  return { input: cost.input, output: cost.output ?? 0, cacheRead: cost.cacheRead ?? 0, cacheWrite: cost.cacheWrite ?? 0 };
 }
 
 /** 解析 Target → pi Model；找不到回 undefined（可用性，Stage 4 實作契約第 1 點）。 */
 function resolveModel(ctx: ExtensionContext, target: Target): ReturnType<ExtensionContext["modelRegistry"]["find"]> {
-  if (!target.provider) return undefined;
-  return ctx.modelRegistry.find(target.provider, target.model);
+  if (target.provider) return ctx.modelRegistry.find(target.provider, target.model);
+  // provider 為空（prefer 注入或裸 id）：在 registry 找**唯一**同 id 的模型；
+  // 多個 provider 都有同 id → 歧義，拒絕而不是猜（2026-10-03 W3）。
+  const matches = ctx.modelRegistry.getAll().filter((model) => model.id === target.model);
+  return matches.length === 1 ? matches[0] : undefined;
 }
 
 /** 給 classify 的種類集合（`taskKinds` 的 keys）。 */
@@ -272,11 +275,9 @@ async function routeTurn(
 /** Stage 5 hooks：接 pi 的 setModel/setThinkingLevel + ctx 的 entry 寫入。 */
 function buildHooks(pi: ExtensionAPI, ctx: ExtensionContext): ApplyHooks {
   return {
-    async setModel(key: string): Promise<void> {
-      const slash = key.indexOf("/");
-      const provider = slash > 0 ? key.slice(0, slash) : "";
-      const modelId = slash > 0 ? key.slice(slash + 1) : key;
-      const model = ctx.modelRegistry.find(provider, modelId);
+    async setModel(target: Target): Promise<void> {
+      const model = resolveModel(ctx, target);
+      const key = targetKey(target);
       if (!model) throw new Error(`model not found: ${key}`);
       const ok = await pi.setModel(model);
       if (!ok) throw new Error(`auth not configured for ${key}`);

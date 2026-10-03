@@ -29,6 +29,8 @@ export interface GuardState {
    * 未提供 → 跳過 cache 這一步（與「價格未知不擋切換」一致，Part 7）。
    */
   cachePenaltyUsd?: number;
+  /** 預算是否強制改變了層級（由 `applyBudget` 決定）——deadband/cooldown 的豁免依據。 */
+  budgetForced?: boolean;
 }
 
 /** Stage 4 輸出。 */
@@ -55,11 +57,48 @@ function formatUsd(value: number): string {
 }
 
 /**
- * Stage 4（Part 5），順序不可調換：
- *   stickiness → budget → cache → cooldown → mode
+ * 預算層級調整（Part 8）——**在選 target 之前**跑。
  *
- * `budget` 先於 `cache`：花費硬約束應該比快取成本更有優先權；
- * `cooldown` 最後，因為它豁免前一步的 hardRatio 降級（Part 7）。
+ * 2026-10-03（審查 W2）：原本 budget 在 guard 裡只改 tier 標籤，target 早已
+ * 按原層級選定，導致「降級」不會真的換到便宜模型。抽出來後 `planTurn` 用
+ * 回傳的 tier 重跑 Stage 3，成本政策才真的生效。
+ *
+ * `demand >= 2.5` 的架構性回合在 hard ratio 下可留 standard（Part 8）。
+ */
+export function applyBudget(
+  tier: Tier,
+  demand: number,
+  budgets: { todayUsd: number; monthUsd: number },
+  config: CompassConfig,
+): { tier: Tier; reasons: string[]; forced: boolean } {
+  const pressure = computePressure(budgets, config);
+  if (pressure >= config.budget.hardRatio) {
+    const forced: Tier = demand >= 2.5 ? "standard" : "quick";
+    const next = clampTier(Math.min(rank(tier), rank(forced)));
+    if (next !== tier) {
+      return { tier: next, reasons: [`budget hard ratio ${(pressure * 100).toFixed(0)}% of cap → ${next}`], forced: true };
+    }
+    return { tier, reasons: [], forced: false };
+  }
+  if (pressure >= config.budget.softRatio) {
+    const next = clampTier(rank(tier) - 1);
+    if (next !== tier) {
+      return {
+        tier: next,
+        reasons: [`budget soft ratio ${(pressure * 100).toFixed(0)}% of cap → one tier down (${next})`],
+        forced: true,
+      };
+    }
+  }
+  return { tier, reasons: [], forced: false };
+}
+
+/**
+ * Stage 4 後半（Part 5），順序不可調換：
+ *   stickiness → cache → cooldown → mode
+ *
+ * 預算已在呼叫端（`planTurn` → `applyBudget`）先套用並**重選 target**；
+ * `budgetForced` 讓 deadband/cooldown 對預算強制變更讓路（Part 7/8）。
  */
 export function guard(
   request: GuardRequest,
@@ -68,41 +107,19 @@ export function guard(
   mode: Mode,
 ): GuardResult {
   const { target, tier: requestedTier, demand } = request;
+  const budgetForced = state.budgetForced === true;
+  let tier = requestedTier;
 
   // 1. stickiness — 當前已是目標 → held（層級沿用當前，Part 5）。
   // 比較要用完整 `provider/model`（與呼叫端 currentModel 同編碼）——
   // 只比 target.model 會在 provider 非空時**永遠不命中**（2026-10-03 實跑發現）。
   const targetId = target.provider ? `${target.provider}/${target.model}` : target.model;
-  if (state.currentModel !== null && state.currentModel === targetId) {
+  if (config.stickiness && state.currentModel !== null && state.currentModel === targetId) {
     return {
       outcome: "held",
       tier: state.currentTier ?? requestedTier,
       reason: "stickiness — already on the chosen model",
     };
-  }
-
-  // 2. budget（Part 8）。
-  let tier = requestedTier;
-  const reasons: string[] = [];
-  let budgetForcedDowngrade = false;
-  const pressure = computePressure({ todayUsd: state.todayUsd, monthUsd: state.monthUsd }, config);
-
-  if (pressure >= config.budget.hardRatio) {
-    // demand >= 2.5（明顯架構性）可留 standard，否則強制 quick。
-    const forced: Tier = demand >= 2.5 ? "standard" : "quick";
-    const next = clampTier(Math.min(rank(tier), rank(forced)));
-    budgetForcedDowngrade = next !== tier;
-    if (budgetForcedDowngrade) {
-      tier = next;
-      reasons.push(`budget hard ratio ${(pressure * 100).toFixed(0)}% of cap → ${tier}`);
-    }
-  } else if (pressure >= config.budget.softRatio) {
-    const next = clampTier(rank(tier) - 1);
-    if (next !== tier) {
-      tier = next;
-      budgetForcedDowngrade = true;
-      reasons.push(`budget soft ratio ${(pressure * 100).toFixed(0)}% of cap → one tier down (${tier})`);
-    }
   }
 
   const currentRank = state.currentTier === null ? null : rank(state.currentTier);
@@ -121,7 +138,7 @@ export function guard(
     // 預算強制變更同時豁免 deadband：錢的約束優先於「需求不確定性」，
     // 與它已有的 cooldown 豁免一致（Part 7）。否則 soft/hard 降級會先被
     // 死區擋住，預算政策形同虛設。
-    if (withinBand && !bypass && !budgetForcedDowngrade) {
+    if (withinBand && !bypass && !budgetForced) {
       return {
         outcome: "held",
         tier: state.currentTier,
@@ -151,7 +168,7 @@ export function guard(
 
   // 4. cooldown（Part 7）：大跳與 hardRatio 降級豁免。
   const cooldownSeconds = config.cache.cooldownSeconds;
-  if (cooldownSeconds > 0 && state.lastSwitchAtMs !== null && !budgetForcedDowngrade && !bypass) {
+  if (cooldownSeconds > 0 && state.lastSwitchAtMs !== null && !budgetForced && !bypass) {
     const elapsedMs = Date.now() - state.lastSwitchAtMs;
     if (elapsedMs < cooldownSeconds * 1000) {
       return {
@@ -164,12 +181,8 @@ export function guard(
 
   // 5. mode（Part 5 表）。
   if (mode === "notify") {
-    return {
-      outcome: "notify-only",
-      tier,
-      reason: reasons.length > 0 ? reasons.join(" · ") : "notify mode — suggestion only, nothing applied",
-    };
+    return { outcome: "notify-only", tier, reason: "notify mode — suggestion only, nothing applied" };
   }
 
-  return { outcome: "applied", tier, reason: reasons.length > 0 ? reasons.join(" · ") : undefined };
+  return { outcome: "applied", tier };
 }

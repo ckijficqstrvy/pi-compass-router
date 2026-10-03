@@ -2,7 +2,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 
 import { DEMAND_LADDER, TIER_DEMAND_FLOOR, compose } from "../extensions/pi-compass-router/route/compose.js";
-import { guard, type GuardRequest, type GuardState } from "../extensions/pi-compass-router/route/guard.js";
+import { applyBudget, guard, type GuardRequest, type GuardState } from "../extensions/pi-compass-router/route/guard.js";
 import { filterChain, insertPrefer } from "../extensions/pi-compass-router/policy/filter.js";
 import { DEFAULT_CONFIG } from "../extensions/pi-compass-router/schema.js";
 import type { CompassConfig, Target } from "../extensions/pi-compass-router/schema.js";
@@ -188,12 +188,14 @@ test("no policy configured leaves the chain untouched", () => {
 test("insertPrefer prepends heads, marks them explicit, and dedupes", () => {
   const cfg = config({ prefer: { quick: ["moonshotai/kimi-k3"] } });
   const out = insertPrefer(targets, "quick", cfg);
-  assert.equal(out[0].model, "moonshotai/kimi-k3");
+  // W3：prefer 與其他 key 共用 codec → provider/model 正確拆開，availability 才找得到。
+  assert.equal(out[0].provider, "moonshotai");
+  assert.equal(out[0].model, "kimi-k3");
   assert.equal(out[0].explicit, true, "prefer heads are explicit");
-  assert.equal(out[0].provider, "", "id-only match, provider is unknown for a bare catalogue id");
   assert.equal(out.length, 3 + 1);
 
-  const duped = insertPrefer([{ provider: "openrouter", model: "moonshotai/kimi-k3" }], "quick", cfg);
+  // 同一個真實模型（provider+model 分開）→ 去重。
+  const duped = insertPrefer([{ provider: "moonshotai", model: "kimi-k3" }], "quick", cfg);
   assert.equal(duped.length, 1, "the pre-existing entry is replaced, not duplicated");
 });
 
@@ -204,7 +206,7 @@ test("insertPrefer is a no-op for a tier with no preference", () => {
 test("a prefer head survives a deny that matches it (explicit beats policy)", () => {
   const cfg = config({ prefer: { quick: ["anthropic/claude-opus-latest"] }, deny: ["*claude-opus*"] });
   const out = insertPrefer(filterChain(targets, cfg), "quick", cfg);
-  assert.equal(out[0].model, "anthropic/claude-opus-latest", "prefer is injected after filtering and never filtered");
+  assert.equal(`${out[0].provider}/${out[0].model}`, "anthropic/claude-opus-latest", "prefer is injected after filtering and never filtered");
 });
 
 // ---------------------------------------------------------------------------
@@ -240,36 +242,36 @@ test("guard: an affordable turn applies unchanged", () => {
   assert.equal(result.tier, "high");
 });
 
-test("guard: soft budget pressure drops exactly one tier", () => {
+test("applyBudget: soft pressure drops exactly one tier", () => {
   // 3.6 / 5 = 0.72 >= softRatio 0.7, below hardRatio 0.9
-  const result = guard(request("high", 2.8), state({ todayUsd: 3.6 }), config(), "auto");
-  assert.equal(result.outcome, "applied");
-  assert.equal(result.tier, "standard");
-  assert.match(String(result.reason), /soft ratio/);
+  const out = applyBudget("high", 2.8, { todayUsd: 3.6, monthUsd: 0 }, config());
+  assert.equal(out.tier, "standard");
+  assert.equal(out.forced, true);
+  assert.match(out.reasons.join(" "), /soft ratio/);
 });
 
-test("guard: hard budget pressure forces quick when demand is low", () => {
+test("applyBudget: hard pressure forces quick when demand is low", () => {
   // 4.6 / 5 = 0.92 >= hardRatio 0.9, demand 1.0 < 2.5
-  const result = guard(request("high", 1.0), state({ todayUsd: 4.6 }), config(), "auto");
-  assert.equal(result.tier, "quick");
-  assert.match(String(result.reason), /hard ratio/);
+  const out = applyBudget("high", 1.0, { todayUsd: 4.6, monthUsd: 0 }, config());
+  assert.equal(out.tier, "quick");
+  assert.match(out.reasons.join(" "), /hard ratio/);
 });
 
-test("guard: hard pressure still allows standard when demand >= 2.5", () => {
-  const result = guard(request("premium", 2.6), state({ todayUsd: 4.6 }), config(), "auto");
-  assert.equal(result.tier, "standard", "architectural turns may stay at standard (Part 8)");
+test("applyBudget: hard pressure still allows standard when demand >= 2.5", () => {
+  const out = applyBudget("premium", 2.6, { todayUsd: 4.6, monthUsd: 0 }, config());
+  assert.equal(out.tier, "standard", "architectural turns may stay at standard (Part 8)");
 });
 
-test("guard: hard pressure never raises a tier that was already cheaper", () => {
-  const result = guard(request("quick", 1.0), state({ todayUsd: 4.6 }), config(), "auto");
-  assert.equal(result.tier, "quick");
-  assert.equal(result.outcome, "applied");
+test("applyBudget: hard pressure never raises a tier that was already cheaper", () => {
+  const out = applyBudget("quick", 1.0, { todayUsd: 4.6, monthUsd: 0 }, config());
+  assert.equal(out.tier, "quick");
+  assert.equal(out.forced, false);
 });
 
-test("guard: an uncapped budget never downgrades", () => {
+test("applyBudget: an uncapped budget never downgrades", () => {
   const uncapped = config({ budget: { dailyUsd: null, monthlyUsd: null, softRatio: 0.7, hardRatio: 0.9 } });
-  const result = guard(request("premium", 3), state({ todayUsd: 1e9, monthUsd: 1e9 }), uncapped, "auto");
-  assert.equal(result.tier, "premium");
+  const out = applyBudget("premium", 3, { todayUsd: 1e9, monthUsd: 1e9 }, uncapped);
+  assert.equal(out.tier, "premium");
 });
 
 test("guard: notify mode reports the suggestion without applying it", () => {
@@ -337,15 +339,16 @@ test("guard: cooldown blocks a switch until it expires", () => {
   assert.match(String(result.reason), /cooldown/);
 });
 
-test("guard: a hard-budget downgrade is exempt from cooldown", () => {
+test("guard: a budget-forced change is exempt from cooldown", () => {
+  // W2 後：budget 在 planTurn 決定 tier，guard 只要看到 budgetForced 就讓路。
   const cfg = config({ cache: { ...DEFAULT_CONFIG.cache, cooldownSeconds: 300 } });
   const result = guard(
-    request("high", 1.0),
-    state({ currentTier: "standard", todayUsd: 4.6, lastSwitchAtMs: Date.now() - 1000 }),
+    request("quick", 1.0),
+    state({ currentTier: "standard", lastSwitchAtMs: Date.now() - 1000, budgetForced: true }),
     cfg,
     "auto",
   );
-  assert.equal(result.outcome, "applied", "hard-ratio downgrades bypass the cooldown (Part 7)");
+  assert.equal(result.outcome, "applied", "budget-forced changes bypass the cooldown (Part 7)");
   assert.equal(result.tier, "quick");
 });
 
@@ -363,16 +366,15 @@ test("guard: a big tier jump is exempt from cooldown", () => {
 test("guard: a budget-forced downgrade bypasses the deadband", () => {
   // soft 降級 high → standard，delta = 1 < bypassTierDelta 2，故 bypass 不生效；
   // demand 2.4 > floor(high)=2.5 − deadband 0.25 = 2.25，落在死區內。
-  // 若預算降級不豁免 deadband，這裡會被擋回 high。
+  // budgetForced 必須讓 deadband 讓路（錢的約束優先）。
   const result = guard(
-    request("high", 2.4),
-    state({ currentTier: "high", todayUsd: 3.6 }),
+    request("standard", 2.4),
+    state({ currentTier: "high", budgetForced: true }),
     config(),
     "auto",
   );
   assert.equal(result.outcome, "applied", "money constraint beats demand uncertainty");
   assert.equal(result.tier, "standard");
-  assert.match(String(result.reason), /soft ratio/);
 });
 // ---------------------------------------------------------------------------
 // Stage 5 — apply
@@ -396,9 +398,9 @@ function decision(overrides: Partial<ApplyDecision> = {}): ApplyDecision {
 function hooks(overrides: Partial<ApplyHooks> & { failModel?: boolean } = {}) {
   const calls: { model?: string; thinking?: string; entries: RouteEntry[] } = { entries: [] };
   const h: ApplyHooks = {
-    setModel(model: string) {
+    setModel(target) {
       if (overrides.failModel) throw new Error("boom");
-      calls.model = model;
+      calls.model = target.provider ? `${target.provider}/${target.model}` : target.model;
     },
     setThinkingLevel(level: string) {
       calls.thinking = level;

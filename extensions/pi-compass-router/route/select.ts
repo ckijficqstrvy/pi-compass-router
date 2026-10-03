@@ -12,33 +12,8 @@ function tierRank(tier: Tier): number {
   return TIER_ORDER.indexOf(tier);
 }
 
-/**
- * `Target` → menu id（Part 5 Stage 3「menu id 的形狀」，2026-10-01 補）。
- *
- * 形狀固定為 `"<provider>/<model>"`；`provider` 為空字串（`prefer` 注入、
- * 或呼叫端只給了裸 id）時**只回裸 `model`**。Stage 1 組 menu、
- * `parseAnalysis` 驗證 pick、Stage 5 `setModel` 取引數，三處共用此編碼，
- * 避免漂移。
- */
-export function targetKey(target: Target): string {
-  return target.provider ? `${target.provider}/${target.model}` : target.model;
-}
-
-/**
- * 編碼 menu id → `Target`（`targetKey` 的反向）。
- *
- * 關鍵：`~z-ai/glm-latest` 這類 id 有**前導 `~`**，它的 `/` 不是 provider 分隔
- * 而是模型 id 的一部分。直接按第一個 `/` 分割會得到 `provider: "~z-ai"`、
- * `model: "glm-latest"`——丟失 `~` 前綴、破壞 round-trip，且使 menu gate 的
- * `factFor` 查不到事實。故先剝離前導 `~`：只有**無前導 `~`** 才視第一個 `/`
- * 為 provider 分隔（有 `~` → provider 為空字串、整個字串是 model id）。
- */
-export function targetFromKey(key: string): Target {
-  if (key.startsWith("~")) return { provider: "", model: key };
-  const slash = key.indexOf("/");
-  if (slash <= 0) return { provider: "", model: key };
-  return { provider: key.slice(0, slash), model: key.slice(slash + 1) };
-}
+import { targetFromKey, targetKey } from "../target.js";
+export { targetFromKey, targetKey } from "../target.js";
 
 /**
  * 組 menu（`modelPick: "menu"` 時供 Stage 1 傳入 `ClassifyInput.menu`）。

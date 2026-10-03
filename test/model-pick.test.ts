@@ -279,3 +279,11 @@ test("factFor resolves the facts used by the gate", () => {
   assert.ok(fact, "grok-latest must be in the facts file");
   assert.ok(fact.capability >= 38, "grok capability clears the high floor");
 });
+test("factFor never borrows another provider's fact (W8 regression)", () => {
+  // 取一個真實 facts 條目，用錯的 provider 查 → 必須 undefined（不再跨 provider 誤配）。
+  const known = factFor("openrouter", "~x-ai/grok-latest");
+  assert.ok(known, "fixture fact exists");
+  assert.equal(factFor("some-other-provider", "~x-ai/grok-latest"), undefined);
+  // 裸 id 且唯一 → 允許（provider 無法得知）；不存在或歧義 → undefined。
+  assert.equal(factFor("", "definitely-not-a-real-model-xyz"), undefined);
+});

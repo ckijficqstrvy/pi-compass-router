@@ -1,6 +1,7 @@
 // policy/filter.ts — L2 政策過濾：deny / allowProviders / prefer / 價格帶天花板
 //（SPEC Part 9 四層政策、Part 5 Stage 3）。
 import { PROFILE_CEILINGS, type CompassConfig, type Profile, type Target, type Tier } from "../schema.js";
+import { targetFromKey, targetKey } from "../target.js";
 
 /**
  * 某層的生效天花板（$\/M，`input+2×output`）：顯式 `ceilings[tier]` 覆寫
@@ -67,11 +68,10 @@ export function insertPrefer(chain: Target[], tier: string, config: CompassConfi
   const heads = config.prefer[tier as keyof CompassConfig["prefer"]];
   if (!heads || heads.length === 0) return chain;
 
-  const injected: Target[] = heads.map((model) => ({
-    provider: "",
-    model,
-    explicit: true,
-  }));
-  const injectedIds = new Set(injected.map((target) => target.model));
-  return [...injected, ...chain.filter((target) => !injectedIds.has(target.model))];
+  // 2026-10-03（W3）：prefer 字串要與其他 key 用**同一個 codec** 解析。
+  // 原本一律塞 provider:""，導致 availability（resolveModel 需要 provider）
+  // 永遠丟棄 prefer head——「顯式勝出」實質失效。
+  const injected: Target[] = heads.map((model) => ({ ...targetFromKey(model), explicit: true }));
+  const injectedIds = new Set(injected.map((target) => targetKey(target)));
+  return [...injected, ...chain.filter((target) => !injectedIds.has(targetKey(target)))];
 }

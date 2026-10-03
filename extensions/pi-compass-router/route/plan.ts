@@ -9,12 +9,15 @@
 import type { Judgment } from "../classify/types.js";
 import type { CompassConfig, Target, Tier } from "../schema.js";
 import { compose, type ComposeResult } from "./compose.js";
-import { guard, type GuardResult } from "./guard.js";
+import { ceilingFor } from "../policy/filter.js";
+import { applyBudget, guard, type GuardResult } from "./guard.js";
 import { selectTargets } from "./select.js";
 
 /** 模型費率（USD / 每百萬 token；與 pi 的 `Model.cost` 同單位）。 */
 export interface CostRates {
   input: number;
+  /** 輸出費率（registry `Model.cost.output`）；未知時視為 0（blended 只用 input）。 */
+  output?: number;
   cacheRead: number;
   cacheWrite: number;
 }
@@ -89,11 +92,32 @@ export function planTurn(
   deps: PlanDeps,
 ): PlanResult {
   const composed = compose(judgment, config);
-  const selected = selectTargets(composed.tier, judgment, config);
+
+  // W2（2026-10-03）：預算先決定**有效層級**，再依它重選候選。原本先選 target
+  // 再由 guard 降 tier，結果只是把標籤改便宜、模型照切貴的。
+  const budget = applyBudget(
+    composed.tier,
+    composed.demand,
+    { todayUsd: snapshot.todayUsd, monthUsd: snapshot.monthUsd },
+    config,
+  );
+  const effectiveTier = budget.tier;
+  const selected = selectTargets(effectiveTier, judgment, config);
+
+  // W8（2026-10-03）：以 **registry 即時價格**重驗價格天花板——靜態 facts 可能
+  // 過期；未知價格不擋（fail-open）。
+  const ceiling = ceilingFor(config, composed.tier);
+  const priceOk = (candidate: Target): boolean => {
+    if (ceiling === null) return true;
+    const cost = deps.costOf(candidate);
+    if (!cost) return true;
+    const blended = cost.input + 2 * (cost.output ?? 0);
+    return blended <= ceiling;
+  };
 
   let target: Target | undefined;
-  if (selected.picked && deps.isAvailable(selected.picked)) target = selected.picked;
-  else target = selected.chain.find((candidate) => deps.isAvailable(candidate));
+  if (selected.picked && deps.isAvailable(selected.picked) && priceOk(selected.picked)) target = selected.picked;
+  else target = selected.chain.find((candidate) => deps.isAvailable(candidate) && priceOk(candidate));
 
   if (!target) {
     return { composed, notes: selected.notes, unavailable: true };
@@ -107,7 +131,7 @@ export function planTurn(
   }
 
   const result = guard(
-    { target, tier: composed.tier, demand: composed.demand },
+    { target, tier: effectiveTier, demand: composed.demand },
     {
       currentModel: snapshot.currentModel,
       currentTier: snapshot.currentTier,
@@ -115,10 +139,13 @@ export function planTurn(
       monthUsd: snapshot.monthUsd,
       lastSwitchAtMs: snapshot.lastSwitchAtMs,
       cachePenaltyUsd: cacheMissUsd,
+      budgetForced: budget.forced,
     },
     config,
     config.mode,
   );
 
-  return { composed, target, guard: result, notes: selected.notes, cacheMissUsd };
+  // 預算理由與 guard 理由合併（entry 顯示完整因果）。
+  const reason = [...budget.reasons, result.reason].filter(Boolean).join(" · ") || undefined;
+  return { composed, target, guard: { ...result, reason }, notes: selected.notes, cacheMissUsd };
 }

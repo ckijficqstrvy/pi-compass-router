@@ -7,7 +7,7 @@ import { targetKey } from "./select.js";
 
 /** pi 提供的切換掛點（Part 5 Stage 5：setModel + setThinkingLevel + read back）。 */
 export interface ApplyHooks {
-  setModel(model: string): Promise<void> | void;
+  setModel(target: Target): Promise<void> | void;
   setThinkingLevel(level: ThinkingLevel): Promise<void> | void;
   /** 套用後讀回實際層級（模型會 clamp）（Part 5 Stage 5）。 */
   readThinkingLevel?(): ThinkingLevel | undefined;
@@ -132,7 +132,7 @@ export async function applyRoute(
   if (wantsModel) {
     try {
       // prefer 注入的條目 provider 為空字串 → 只傳裸 model（targetKey，同 menu id 編碼）。
-      await hooks.setModel(targetKey(target));
+      await hooks.setModel(target);
       result.applied = true;
       if (symbol === "→") entry.symbol = "→";
     } catch (e) {

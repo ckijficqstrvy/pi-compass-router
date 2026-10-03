@@ -5,6 +5,7 @@ import { readDecisions, type DecisionRecord } from "./decisions.js";
 import { MODEL_FACTS, factsValid, factFor } from "./policy/facts.js";
 import { TIERS, TIER_CAPABILITY_FLOOR, type CompassConfig, type Target, type Tier } from "./schema.js";
 import { selectTargets } from "./route/select.js";
+import { targetFromKey } from "./target.js";
 
 /** 一條路由提議。 */
 export interface Suggestion {
@@ -183,9 +184,3 @@ function deriveTier(key: string, config: CompassConfig): Tier | undefined {
   return TIERS.find((tier) => fact.capability >= TIER_CAPABILITY_FLOOR[tier]);
 }
 
-/** key → Target（同 `select.targetKey` 的反向編碼）。 */
-function targetFromKey(key: string): Target {
-  const slash = key.indexOf("/");
-  if (slash <= 0) return { provider: "", model: key };
-  return { provider: key.slice(0, slash), model: key.slice(slash + 1) };
-}

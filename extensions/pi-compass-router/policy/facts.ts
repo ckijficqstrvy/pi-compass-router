@@ -79,11 +79,11 @@ export function factsValid(value: unknown): value is FactsFile {
  * modelPick 的閘門要據此處理（Part 5 Stage 3）。
  */
 export function factFor(provider: string, id: string): ModelFact | undefined {
-  return (
-    MODEL_FACTS.models.find((f) => f.provider === provider && f.model === id) ??
-    MODEL_FACTS.models.find((f) => f.model === id) ??
-    undefined
-  );
+  if (provider) return MODEL_FACTS.models.find((f) => f.provider === provider && f.model === id);
+  // provider 為空（裸 id）：只在**唯一**同 id 時回傳；多個 provider 同名 → 歧義，
+  // 寧可回 undefined 也不套用別人的價格/能力（2026-10-03 W8）。
+  const matches = MODEL_FACTS.models.filter((f) => f.model === id);
+  return matches.length === 1 ? matches[0] : undefined;
 }
 
 /** 依能力降序；同分保持檔案順序（穩定，重刷不會洗牌）。 */
