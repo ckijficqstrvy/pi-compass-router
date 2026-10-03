@@ -36,6 +36,7 @@ export type MenuItem =
   | "allowUnratedPicks"
   | "thinking"
   | "cache"
+  | "advanced"
   | "daily"
   | "monthly"
   | "ratios"
@@ -66,7 +67,7 @@ export type MenuItem =
   | "chainSource";
 
 export const GROUP_ITEMS: Readonly<Record<Group, readonly MenuItem[]>> = {
-  routing: ["enabled", "mode", "stickiness", "modelPick", "allowUnratedPicks", "thinking", "cache"],
+  routing: ["enabled", "mode", "advanced", "stickiness", "modelPick", "allowUnratedPicks", "thinking", "cache"],
   budget: ["daily", "monthly", "ratios", "profile", "freeOnly"],
   models: ["chains", "kindModels", "prefer", "kindTiers", "xpremium", "useDefaultModels"],
   classifier: ["provider", "checkpoint", "classifyCache", "classifyNums"],
@@ -84,6 +85,7 @@ export const ITEM_NAMES: Readonly<Record<MenuItem, string>> = {
   allowUnratedPicks: "允許未評分模型",
   thinking: "思考層級",
   cache: "切換成本 cache",
+  advanced: "進階選項",
   daily: "每日上限",
   monthly: "每月上限",
   ratios: "預算警戒線",
@@ -114,6 +116,19 @@ export const ITEM_NAMES: Readonly<Record<MenuItem, string>> = {
   chainSource: "看鏈的來源",
 };
 
+/** 工程師向項目：`advanced: false`（預設）時隱藏，只在「進階選項」開啟後出現。 */
+export const ADVANCED_ITEMS: ReadonlySet<MenuItem> = new Set([
+  "stickiness", "modelPick", "allowUnratedPicks", "thinking", "cache",
+  "ratios", "freeOnly",
+  "chains", "kindModels", "prefer", "kindTiers", "xpremium", "useDefaultModels",
+  "checkpoint", "classifyCache", "classifyNums",
+  "filters", "ceilings", "scoresFile",
+  "chainSource",
+]);
+
+/** 整組都是工程師向：Basic 模式下整個分組不顯示。 */
+export const ADVANCED_GROUPS: ReadonlySet<Group> = new Set(["models", "policy"]);
+
 export const MENU_LABEL = "compass 設定（↑↓ 選組，Enter 進入，Esc 結束）";
 export const BACK_OPTION = "← 返回";
 export const DONE_OPTION = "結束";
@@ -125,7 +140,9 @@ export const DONE_OPTION = "結束";
 export function renderGroupRow(group: Group, config: CompassConfig): string {
   switch (group) {
     case "routing":
-      return t`① 路由行為 ........... ${config.mode} · 粘住 ${onOff(config.stickiness)} · 挑模型 ${config.modelPick}`;
+      return config.advanced
+        ? t`① 路由行為 ........... ${config.mode} · 粘住 ${onOff(config.stickiness)} · 挑模型 ${config.modelPick}`
+        : t`① 路由行為 ........... ${config.mode}`;
     case "budget":
       return t`② 預算與花費 .......... ${money(config.budget.dailyUsd)}/日 · ${money(config.budget.monthlyUsd)}/月 · ${config.profile}`;
     case "models": {
@@ -133,7 +150,9 @@ export function renderGroupRow(group: Group, config: CompassConfig): string {
       return t`③ 模型與層級 .......... quick ${chainSummary(config.routes.quick)} · 專家 ${Object.keys(config.kindModels).length} 種${stale === null ? "" : t` ⚠快照 ${stale}天`}`;
     }
     case "classifier":
-      return t`④ 分類器 ............. ${config.classify.provider} · TTL ${config.classify.cacheTtlSeconds}s · timeout ${config.classify.timeoutMs}ms`;
+      return config.advanced
+        ? t`④ 分類器 ............. ${config.classify.provider} · TTL ${config.classify.cacheTtlSeconds}s · timeout ${config.classify.timeoutMs}ms`
+        : t`④ 分類器 ............. ${config.classify.provider}`;
     case "policy": {
       const preferCount = Object.values(config.prefer).reduce((n, list) => n + (list?.length ?? 0), 0);
       const ceilingsCount = Object.keys(config.ceilings).length;
@@ -144,7 +163,9 @@ export function renderGroupRow(group: Group, config: CompassConfig): string {
       return t`⑥ 顯示與呈現 ........... ${d.detail} · 欄位 ${d.fields.length} · ${d.color}${d.badge ? t(" · 徽章") : ""}`;
     }
     case "diagnostics":
-      return t("⑦ 重設・診斷 .......... 重設某項 · 測試分類器 · 看鏈的來源");
+      return config.advanced
+        ? t("⑦ 重設・診斷 .......... 重設某項 · 測試分類器 · 看鏈的來源")
+        : t("⑦ 重設・診斷 .......... 重設某項 · 測試分類器");
   }
 }
 
@@ -215,6 +236,8 @@ export function renderItemRow(item: MenuItem, config: CompassConfig): string {
       const count = Object.keys(config.ceilings).length;
       return `${name}${pad}${count === 0 ? t("依 profile 價格帶") : t`${count} 層自訂`}`;
     }
+    case "advanced":
+      return t`${name}${pad}${onOff(config.advanced)}（顯示工程師向選項）`;
     case "scoresFile":
       return `${name}${pad}${config.suggest.scoresFile === "" ? t("未設定") : config.suggest.scoresFile}`;
     case "detail":

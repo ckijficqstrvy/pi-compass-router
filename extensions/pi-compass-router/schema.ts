@@ -208,6 +208,8 @@ export interface CompassConfig {
   display: DisplayConfig;
   /** 決策日誌（非內容欄位；預設開，SPEC Part 8/11）。 */
   decisionLog: boolean;
+  /** 顯示工程師向設定（/compass-set 的進階選項；預設關，SPEC Part 10.2）。 */
+  advanced: boolean;
 }
 
 /**
@@ -364,6 +366,8 @@ export const DEFAULT_CONFIG: CompassConfig = {
   display: { ...DISPLAY_DEFAULTS, fields: [...DISPLAY_DEFAULTS.fields] },
   // 決策日誌：預設開啟，只存非內容欄位（可用 config 設 false 關閉）。
   decisionLog: true,
+  // 進階設定預設隱藏：一般使用者只看到必要的幾項。
+  advanced: false,
 };
 
 /** 每層預設 thinking（Part 5 Stage 2 `TIER_THINKING`）。 */

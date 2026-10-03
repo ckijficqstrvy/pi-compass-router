@@ -140,7 +140,8 @@ function scripted(script: Script = {}): Scripted {
 
 /** 每個測試都從乾淨的 DEFAULT_CONFIG 深拷貝出發（不污染共用預設值）。 */
 function freshConfig(overrides: Partial<CompassConfig> = {}): CompassConfig {
-  return { ...structuredClone(DEFAULT_CONFIG), ...overrides } as CompassConfig;
+  // 既有測試覆蓋全部項目：預設開進階；Basic 模式另有專屬測試。
+  return { ...structuredClone(DEFAULT_CONFIG), advanced: true, ...overrides } as CompassConfig;
 }
 
 // ---------------------------------------------------------------------------
@@ -963,4 +964,51 @@ test("顯示：suggest 分數檔可在選單指定（最小完整化）", async 
 
   assert.deepEqual(s.writes[0], ["suggest", { scoresFile: "/tmp/scores.json" }]);
   assert.equal(config.suggest.scoresFile, "/tmp/scores.json");
+});
+
+// ---------------------------------------------------------------------------
+// Basic / 進階模式（2026-10-03：一般使用者只看必要設定）
+// ---------------------------------------------------------------------------
+
+test("basic 模式隱藏工程師向分組與項目", async () => {
+  const config = freshConfig({ advanced: false });
+  const s = scripted({ menu: [] }); // 只看主選單
+  await runSettingsWizard(config, s.hooks);
+
+  const main = Object.entries(s.rowsSeen).find(([label]) => label.startsWith("compass 設定"))?.[1] ?? [];
+  assert.ok(main.some((row) => row.startsWith("① 路由行為")), "routing stays");
+  assert.ok(main.some((row) => row.startsWith("② 預算與花費")), "budget stays");
+  assert.ok(main.some((row) => row.startsWith("⑥ 顯示與呈現")), "display stays");
+  assert.ok(!main.some((row) => row.startsWith("③")), "models group hidden in basic mode");
+  assert.ok(!main.some((row) => row.startsWith("⑤")), "policy group hidden in basic mode");
+
+  const routing = scripted({ menu: ["① 路由行為"] });
+  await runSettingsWizard(freshConfig({ advanced: false }), routing.hooks);
+  const rows = routing.rowsSeen["① 路由行為：選一項"] ?? [];
+  assert.ok(rows.some((row) => row.startsWith("進階選項")), "the toggle itself is visible");
+  assert.ok(!rows.some((row) => row.startsWith("粘住當前模型")), "stickiness hidden");
+  assert.ok(!rows.some((row) => row.startsWith("切換成本 cache")), "cache knobs hidden");
+});
+
+test("進階選項開關會寫入 advanced: true", async () => {
+  const config = freshConfig({ advanced: false });
+  const s = scripted({
+    menu: ["① 路由行為", "進階選項"],
+    answers: { "進階選項（顯示工程師向設定）": "開" },
+  });
+  await runSettingsWizard(config, s.hooks);
+  assert.deepEqual(s.writes[0], ["advanced", true]);
+  assert.equal(config.advanced, true);
+});
+
+test("basic 模式的組摘要不洩漏進階值", async () => {
+  const s = scripted({ menu: [] });
+  await runSettingsWizard(freshConfig({ advanced: false }), s.hooks);
+  const main = Object.entries(s.rowsSeen).find(([label]) => label.startsWith("compass 設定"))?.[1] ?? [];
+  const routing = main.find((row) => row.startsWith("①")) ?? "";
+  const classifier = main.find((row) => row.startsWith("④")) ?? "";
+  const diagnostics = main.find((row) => row.startsWith("⑦")) ?? "";
+  assert.ok(!routing.includes("粘住") && !routing.includes("挑模型"), routing);
+  assert.ok(!classifier.includes("TTL"), classifier);
+  assert.ok(!diagnostics.includes("看鏈的來源"), diagnostics);
 });

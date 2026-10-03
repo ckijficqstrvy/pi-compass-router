@@ -113,6 +113,9 @@ export const EN: Record<string, string> = {
 
   // ---- 分組列 ----
   "① 路由行為 ........... ${} · 粘住 ${} · 挑模型 ${}": "① Routing ........... ${} · stick ${} · pick ${}",
+  "① 路由行為 ........... ${}": "① Routing ........... ${}",
+  "④ 分類器 ............. ${}": "④ Classifier ........ ${}",
+  "⑦ 重設・診斷 .......... 重設某項 · 測試分類器": "⑦ Reset & diagnostics .. reset · test classifier",
   "② 預算與花費 .......... ${}/日 · ${}/月 · ${}": "② Budget ............ ${}/day · ${}/mo · ${}",
   "③ 模型與層級 .......... quick ${} · 專家 ${} 種${}": "③ Models & tiers .... quick ${} · ${} expert kinds${}",
   "④ 分類器 ............. ${} · TTL ${}s · timeout ${}ms": "④ Classifier ........ ${} · TTL ${}s · timeout ${}ms",
@@ -131,6 +134,10 @@ export const EN: Record<string, string> = {
   "思考層級：選範圍": "Thinking level: pick a scope",
   "分類結果快取": "Classifier result cache",
   "建議分數檔": "Suggestion scores file",
+  "進階選項": "Advanced options",
+  "進階選項（顯示工程師向設定）": "Advanced options (show engineer-facing settings)",
+  "（顯示工程師向選項）": " (show engineer-facing options)",
+  "${}${}${}（顯示工程師向選項）": "${}${}${} (show engineer-facing options)",
   "建議分數檔（/compass suggest 的來源）": "Suggestion scores file (source for /compass suggest)",
   "分數檔路徑（JSON）": "Scores file path (JSON)",
   "路徑不能是空字串": "path cannot be empty",

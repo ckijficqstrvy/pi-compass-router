@@ -30,6 +30,12 @@ export async function editRouting(
       return simpleEdit("enabled", enabled, { enabled });
     }
 
+    case "advanced": {
+      const picked = await pickFrom(hooks, "進階選項（顯示工程師向設定）", ["開", "關"]);
+      if (picked === undefined || picked === null) return picked;
+      return simpleEdit("advanced", picked === "開", { advanced: picked === "開" });
+    }
+
     case "mode": {
       const picked = await pickFrom(
         hooks,

@@ -19,7 +19,7 @@ type GroupEditor = (
 ) => Promise<EditResult | undefined | null>;
 
 const GROUP_EDITORS: ReadonlyArray<readonly [readonly MenuItem[], GroupEditor]> = [
-  [["enabled", "mode", "stickiness", "modelPick", "allowUnratedPicks", "thinking", "cache"], editRouting],
+  [["enabled", "mode", "advanced", "stickiness", "modelPick", "allowUnratedPicks", "thinking", "cache"], editRouting],
   [["daily", "monthly", "ratios", "profile", "freeOnly"], editBudget],
   [["chains", "kindModels", "prefer", "kindTiers", "xpremium", "useDefaultModels"], editModels],
   [["provider", "checkpoint", "classifyCache", "classifyNums"], editClassifier],

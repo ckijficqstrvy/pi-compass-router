@@ -253,7 +253,7 @@ test("en-mode wizard renders no CJK anywhere", async () => {
   const allSeen: string[] = [];
   for (const group of groups) {
     const s = scripted([group, "←"]);
-    const config = { ...DEFAULT_CONFIG, display: { ...DEFAULT_CONFIG.display, language: "en" as const } };
+    const config = { ...DEFAULT_CONFIG, advanced: true, display: { ...DEFAULT_CONFIG.display, language: "en" as const } };
     await runSettingsWizard(config, s.hooks);
     allSeen.push(...s.seen);
   }

@@ -2,7 +2,7 @@
 import { t, setLang } from "./i18n.js";
 import type { CompassConfig } from "../../schema.js";
 import type { WizardHooks } from "./types.js";
-import { GROUP_ITEMS, GROUPS, groupName, groupOf, itemOf, renderGroupRow, renderItemRow, BACK_OPTION, DONE_OPTION, MENU_LABEL } from "./items.js";
+import { ADVANCED_GROUPS, ADVANCED_ITEMS, GROUP_ITEMS, GROUPS, groupName, groupOf, itemOf, renderGroupRow, renderItemRow, BACK_OPTION, DONE_OPTION, MENU_LABEL } from "./items.js";
 import { editItem, notice, pickFrom } from "./edit.js";
 
 // 主迴圈
@@ -22,7 +22,9 @@ export async function runSettingsWizard(
   let live = config;
   for (;;) {
     setLang(live.display.language);
-    const groupRows = GROUPS.map((group) => renderGroupRow(group.id, live));
+    // Basic 模式（advanced=false）：整組工程師向的分組不顯示。
+    const visibleGroups = GROUPS.filter((group) => live.advanced || !ADVANCED_GROUPS.has(group.id));
+    const groupRows = visibleGroups.map((group) => renderGroupRow(group.id, live));
     const chosen = await pickFrom(hooks, MENU_LABEL, [...groupRows, DONE_OPTION]);
     if (chosen === undefined || chosen === null || chosen === DONE_OPTION) return;
     const group = groupOf(chosen);
@@ -34,7 +36,8 @@ export async function runSettingsWizard(
     for (;;) {
       // 語言可能剛在這一層被改（uiLang 項目）——每輪同步，列立即換語言。
       setLang(live.display.language);
-      const itemRows = GROUP_ITEMS[group].map((item) => renderItemRow(item, live));
+      const visibleItems = GROUP_ITEMS[group].filter((item) => live.advanced || !ADVANCED_ITEMS.has(item));
+      const itemRows = visibleItems.map((item) => renderItemRow(item, live));
       const picked = await pickFrom(hooks, t`${groupName(group)}：選一項`, [...itemRows, BACK_OPTION]);
       if (picked === undefined || picked === null || picked === BACK_OPTION) break;
       const item = itemOf(group, picked);

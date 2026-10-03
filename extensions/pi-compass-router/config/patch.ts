@@ -57,6 +57,7 @@ export const PATCH_SCHEMA: Record<string, TSchema> = {
   freeOnly: Type.Boolean(),
   stickiness: Type.Boolean(),
   decisionLog: Type.Boolean(),
+  advanced: Type.Boolean(),
   mode: literalUnion(MODES),
   modelPick: literalUnion(MODEL_PICKS),
   profile: literalUnion(PROFILES),

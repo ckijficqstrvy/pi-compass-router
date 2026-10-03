@@ -210,6 +210,7 @@ pi-compass 是一個 pi 擴充，在每一輪對話**開始之前**判斷該用�
 | `freeOnly` | boolean | `false` | 特殊情境：只用 $0 模型 |
 | `stickiness` | boolean | `true` | 當前已是目標 → 不切換 |
 | `decisionLog` | boolean | `true` | 決策日誌（非內容欄位）寫 `decisions.jsonl`；false 關閉 |
+| `advanced` | boolean | `false` | `/compass-set` 顯示工程師向設定（預設隱藏，2026-10-03） |
 | `cache.aware` | boolean | `true` | 切換前估算 cache miss 成本 |
 | `cache.deadband` | number ≥0 | `0.25` | 需超出當前層 ±deadband 才換層 |
 | `cache.maxPenaltyUsd` | number ≥0 | `0.05` | 估算成本超此 → 擋下切換 |

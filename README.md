@@ -45,6 +45,13 @@ pi install /path/to/pi-compass
 持久化設定走 `/compass-set` 與 `compass_config` 工具；
 工具另有 `compass_route` 供對話中呼叫。
 
+## 一般使用 vs 進階設定
+
+預設**不需要調任何設定**：事實檔自動推導模型鏈、分類器自動選路徑，`/compass-set`
+只顯示必要的幾項（啟用/模式、預算上限、價格 profile、分類後端、顯示與語言）。
+工程師向設定（`cache.*`、`thinking` pin、專家鏈、`deny`/`ceilings`、`suggest` 分數檔、
+鏈來源診斷⋯）藏在 ① 路由行為 → **進階選項** 後面（`advanced: true`）。
+
 ## 顯示與語言
 
 每次路由決策會寫一則 transcript entry（不進 LLM context），收合時是一行
