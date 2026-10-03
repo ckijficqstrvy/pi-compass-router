@@ -2,6 +2,7 @@
 // cooldown，順序固定；可用性由呼叫端在候選鏈上做，見 Part 5 Stage 4 實作契約）。
 import { computePressure } from "../budget.js";
 import { TIER_DEMAND_FLOOR } from "./compose.js";
+import { TIERS } from "../schema.js";
 import type { CompassConfig, Mode, Target, Tier } from "../schema.js";
 
 /** Stage 4 決策結果（Part 5 頭部介面）。 */
@@ -38,7 +39,8 @@ export interface GuardResult {
   reason?: string;
 }
 
-const TIER_ORDER: readonly Tier[] = ["quick", "standard", "high", "premium", "xpremium"];
+/** 層級由低到高；唯一來源是 schema 的 TIERS。 */
+const TIER_ORDER: readonly Tier[] = TIERS;
 
 function rank(tier: Tier): number {
   return TIER_ORDER.indexOf(tier);

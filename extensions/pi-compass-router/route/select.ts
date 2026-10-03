@@ -1,11 +1,12 @@
 // route/select.ts — Stage 3：候選鏈組裝（SPEC Part 5：專家 → 層級 → 池）。
 import { MODEL_FACTS, blendedOf, factFor, factsValid, rankedFacts } from "../policy/facts.js";
 import { ceilingFor, filterChain } from "../policy/filter.js";
-import { TIER_CAPABILITY_FLOOR, type CompassConfig, type Target, type Tier } from "../schema.js";
+import { TIERS, TIER_CAPABILITY_FLOOR, type CompassConfig, type Target, type Tier } from "../schema.js";
 import type { Judgment } from "../classify/types.js";
 
 /** 層級由低到高；供 minTier 過濾與「最近可用層級」回退比較用。 */
-const TIER_ORDER: readonly Tier[] = ["quick", "standard", "high", "premium", "xpremium"];
+/** 層級由低到高；唯一來源是 schema 的 TIERS。 */
+const TIER_ORDER: readonly Tier[] = TIERS;
 
 function tierRank(tier: Tier): number {
   return TIER_ORDER.indexOf(tier);

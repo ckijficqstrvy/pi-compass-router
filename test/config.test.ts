@@ -232,14 +232,18 @@ test("validatePatch rejects unknown keys by name", () => {
   assert.match(String(validatePatch("apiKey", "sk-...")), /whitelist/);
 });
 
-test("validatePatch rejects malformed values with a reason", () => {
-  assert.match(String(validatePatch("enabled", "yes")), /expected true or false/);
-  assert.match(String(validatePatch("mode", "sideways")), /expected one of auto\|confirm\|notify/);
-  assert.match(String(validatePatch("budget", { softRatio: 9 })), /within 0-1/);
-  assert.match(String(validatePatch("deny", ["a", 1])), /array of non-empty strings/);
-  assert.match(String(validatePatch("routes", { quick: [{ model: "x" }] })), /provider and model/);
-  assert.match(String(validatePatch("classify", { timeoutMs: -1 })), /integer >= 0/);
-  assert.match(String(validatePatch("cache", { bogus: 1 })), /unknown setting/);
+test("validatePatch rejects malformed values with a reason naming the key", () => {
+  const reject = (key: string, value: unknown, pattern: RegExp) => {
+    const problem = validatePatch(key, value);
+    assert.ok(problem !== null && pattern.test(problem), `${key}: ${problem}`);
+  };
+  reject("enabled", "yes", /enabled/);
+  reject("mode", "sideways", /mode/);
+  reject("budget", { softRatio: 9 }, /budget\.softRatio/);
+  reject("deny", ["a", 1], /deny/);
+  reject("routes", { quick: [{ model: "x" }] }, /routes\.quick/);
+  reject("classify", { timeoutMs: -1 }, /classify\.timeoutMs/);
+  reject("cache", { bogus: 1 }, /unknown setting/);
 });
 
 test("validatePatch accepts well-formed values", () => {
@@ -531,4 +535,62 @@ test("validatePatch accepts display subkeys and rejects unknown ones", () => {
   assert.match(String(validatePatch("display", { hue: "blue" })), /unknown setting/);
   assert.match(String(validatePatch("display", {})), /at least one/);
   assert.ok(WRITABLE_KEYS.includes("display"), "display is writable through /compass-set and compass_config");
+});
+// ---------------------------------------------------------------------------
+// 白名單單一來源：寫入驗證（嚴格）與檔案解析（寬鬆）不得漂移
+// ---------------------------------------------------------------------------
+
+/**
+ * 每個頂層鍵一個「合法樣本」。契約：`validatePatch` 放行的值，`loadConfig`
+ * 讀入時**不得產生該鍵的警告**（嚴格 ⊆ 寬鬆，且兩者對合法值一致）。
+ *
+ * 這正是 2026-10-03 之前的漏洞：`display` 要在兩份手寫驗證各改一次，遲早
+ * 分家。現在白名單與型別由 `config/patch.ts` 的 typebox schema 單一提供，
+ * 這條測試把「兩邊一致」固定下來。
+ */
+const VALID_SAMPLES: ReadonlyArray<{ key: string; value: unknown }> = [
+  { key: "enabled", value: true },
+  { key: "mode", value: "auto" },
+  { key: "profile", value: "cheap" },
+  { key: "modelPick", value: "menu" },
+  { key: "stickiness", value: false },
+  { key: "useDefaultModels", value: true },
+  { key: "autoRoutes", value: true },
+  { key: "allowUnratedPicks", value: true },
+  { key: "freeOnly", value: true },
+  { key: "classify", value: { timeoutMs: 100 } },
+  { key: "display", value: { detail: "full", language: "en" } },
+  { key: "budget", value: { dailyUsd: 3 } },
+  { key: "cache", value: { deadband: 0.5 } },
+  { key: "deny", value: ["openai/*"] },
+  { key: "allowProviders", value: ["openrouter"] },
+  { key: "prefer", value: { quick: ["openrouter/m"] } },
+  { key: "routes", value: { quick: [{ provider: "openrouter", model: "m" }] } },
+  { key: "kindModels", value: { chat: [{ provider: "openrouter", model: "m" }] } },
+  { key: "kindMinimumTier", value: { chat: "high" } },
+  { key: "ceilings", value: { quick: 1 } },
+  { key: "thinking", value: { pin: "high" } },
+  { key: "specialistPriority", value: { chat: ["m"] } },
+  { key: "taskKinds", value: { chat: { label: "Chat", floor: 1 } } },
+  { key: "xpremium", value: { enabled: true } },
+  { key: "freePool", value: { enabled: true } },
+  { key: "suggest", value: { scoresFile: "/tmp/scores.json" } },
+];
+
+test("every crafted VALID sample passes the strict validator and loads without a warning", () => {
+  for (const { key, value } of VALID_SAMPLES) {
+    assert.equal(validatePatch(key, value), null, `${key} must be writable`);
+    const { path, cleanup } = withTempConfig({ [key]: value });
+    try {
+      const { warnings } = loadConfig(NO_ENV, { filePath: path });
+      const complained = warnings.filter((w) => w.includes(key));
+      assert.deepEqual(complained, [], `${key}: lenient parse must accept what strict accepts`);
+    } finally {
+      cleanup();
+    }
+  }
+});
+
+test("the top-level whitelist is exactly the validator's key set", () => {
+  for (const { key } of VALID_SAMPLES) assert.ok(WRITABLE_KEYS.includes(key), `${key} missing from WRITABLE_KEYS`);
 });

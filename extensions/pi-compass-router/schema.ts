@@ -14,14 +14,20 @@ export const TIERS: readonly Tier[] = ["quick", "standard", "high", "premium", "
 /** 切換模式（Part 3.1 `mode`）。 */
 export type Mode = "auto" | "confirm" | "notify";
 
+/** 枚舉值的唯一來源（load.ts / env.ts / wizard.ts / patch schema 共用）。 */
+export const MODES: readonly Mode[] = ["auto", "confirm", "notify"];
+
 /** 分類後端（Part 3.1 `classify.provider`，local-first 預設 laya）。 */
 export type Provider = "laya" | "cloud";
+export const PROVIDERS: readonly Provider[] = ["laya", "cloud"];
 
 /** 價格帶檔位（Part 3.1 `profile`）。 */
 export type Profile = "cheap" | "balanced" | "quality";
+export const PROFILES: readonly Profile[] = ["cheap", "balanced", "quality"];
 
 /** 模型挑選開關（Part 3.1 `modelPick`）。 */
 export type ModelPickMode = "off" | "menu";
+export const MODEL_PICKS: readonly ModelPickMode[] = ["off", "menu"];
 
 /** 思考層級（Part 3.1 `thinkingLevel` 可能值）。 */
 export type ThinkingLevel =
@@ -32,6 +38,15 @@ export type ThinkingLevel =
   | "high"
   | "xhigh"
   | "max";
+export const THINKING_LEVELS: readonly ThinkingLevel[] = [
+  "off",
+  "minimal",
+  "low",
+  "medium",
+  "high",
+  "xhigh",
+  "max",
+];
 
 /**
  * 任務種類。種類集合由 `taskKinds` 設定決定、可由 JSON 覆寫（移植 #11），

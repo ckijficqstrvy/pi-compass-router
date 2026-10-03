@@ -1,4 +1,5 @@
 // config/env.ts — COMPASS_* 環境變數定義與解析（SPEC Part 3.3）。
+import { MODEL_PICKS, MODES, PROFILES, PROVIDERS, TIERS } from "../schema.js";
 import type { CompassConfig } from "../schema.js";
 
 /**
@@ -85,12 +86,6 @@ const BOOL_EXPECTED = "1/0, true/false, yes/no, or on/off";
 const CAP_CLEAR = new Set(["none", "off", "unlimited"]);
 const CAP_EXPECTED = 'a number >= 0, or "none" to remove the cap';
 const NUMBER_RE = /^[+-]?(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][+-]?\d+)?$/;
-const TIERS = ["quick", "standard", "high", "premium", "xpremium"] as const;
-
-const MODES = ["auto", "confirm", "notify"] as const;
-const PROFILES = ["cheap", "balanced", "quality"] as const;
-const MODEL_PICKS = ["off", "menu"] as const;
-const PROVIDERS = ["laya", "cloud"] as const;
 
 /**
  * 回顯原始值的條件（Part 3.3：只有短的可列印 ASCII 才回顯）。

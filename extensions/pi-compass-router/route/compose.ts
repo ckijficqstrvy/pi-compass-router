@@ -1,6 +1,6 @@
 // route/compose.ts — Stage 2：demand / tier / thinking 組合（SPEC Part 5）。
 import type { CompassConfig, Tier, ThinkingLevel } from "../schema.js";
-import { TIER_THINKING } from "../schema.js";
+import { TIERS, TIER_THINKING } from "../schema.js";
 import type { Judgment } from "../classify/types.js";
 
 /** demand → thinking 的階梯（Part 5 Stage 2，實作常數）。 */
@@ -24,7 +24,8 @@ export const DEMAND_LADDER: ReadonlyArray<{
 };
 
 /** 層級由低到高；用於取 max 與比較。 */
-const TIER_ORDER: readonly Tier[] = ["quick", "standard", "high", "premium", "xpremium"];
+/** 層級由低到高；唯一來源是 schema 的 TIERS（避免各檔自帶一份順序）。 */
+const TIER_ORDER: readonly Tier[] = TIERS;
 
 /** Part 5 Stage 2 的三個權重；修改須回填 SPEC。 */
 const WEIGHT_COMPLEXITY = 0.55;

@@ -5,7 +5,13 @@ import { basename, dirname, join } from "node:path";
 import { COMPASS_ENV_MAP, parseEnvOverrides, type EnvPatch } from "./env.js";
 import { MODEL_FACTS, factsValid, rankedFacts, sliceBands } from "../policy/facts.js";
 import { ceilingFor, filterChain, insertPrefer } from "../policy/filter.js";
+import { TOP_LEVEL_KEYS, validatePatchValue } from "./patch.js";
 import {
+  MODES,
+  MODEL_PICKS,
+  PROFILES,
+  PROVIDERS,
+  THINKING_LEVELS,
   DEFAULT_CONFIG,
   DISPLAY_COLORS,
   DISPLAY_DETAILS,
@@ -34,49 +40,6 @@ export interface LoadResult {
   warnings: string[];
 }
 
-const THINKING_LEVELS: readonly string[] = [
-  "off",
-  "minimal",
-  "low",
-  "medium",
-  "high",
-  "xhigh",
-  "max",
-];
-const MODES = ["auto", "confirm", "notify"] as const;
-const PROFILES = ["cheap", "balanced", "quality"] as const;
-const MODEL_PICKS = ["off", "menu"] as const;
-const PROVIDERS = ["laya", "cloud"] as const;
-
-/** config.json 與 `compass_config` 工具允許出現的頂層鍵（Part 3.4 白名單）。 */
-const TOP_LEVEL_KEYS: readonly string[] = [
-  "enabled",
-  "mode",
-  "useDefaultModels",
-  "classify",
-  "routes",
-  "kindModels",
-  "kindMinimumTier",
-  "taskKinds",
-  "xpremium",
-  "freePool",
-  "specialistPriority",
-  "suggest",
-  "budget",
-  "profile",
-  "ceilings",
-  "deny",
-  "allowProviders",
-  "prefer",
-  "autoRoutes",
-  "modelPick",
-  "allowUnratedPicks",
-  "freeOnly",
-  "stickiness",
-  "cache",
-  "thinking",
-  "display",
-];
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   typeof value === "object" && value !== null && !Array.isArray(value);
@@ -123,7 +86,7 @@ function mergeTarget(base: Target[], incoming: unknown, where: string, warnings:
       continue;
     }
     const target: Target = { provider: item.provider, model: item.model, explicit: true } as Target;
-    if (typeof item.thinkingLevel === "string" && THINKING_LEVELS.includes(item.thinkingLevel)) {
+    if (typeof item.thinkingLevel === "string" && (THINKING_LEVELS as readonly string[]).includes(item.thinkingLevel)) {
       target.thinkingLevel = item.thinkingLevel as ThinkingLevel;
     } else if (item.thinkingLevel !== undefined) {
       warnings.push(`${where}: thinkingLevel must be one of ${THINKING_LEVELS.join("|")} — ignored`);
@@ -607,201 +570,12 @@ export function loadConfig(
 // 寫入驗證（Part 3.4 / `compass_config` 工具白名單）
 // ---------------------------------------------------------------------------
 
-type Check = (value: unknown) => string | null;
-const bad = (reason: string): string => reason;
-const ok = (): null => null;
-
-const bool: Check = (v) => (typeof v === "boolean" ? ok() : bad("expected true or false"));
-const nonEmptyString: Check = (v) =>
-  typeof v === "string" && v.trim().length > 0 ? ok() : bad("expected a non-empty string");
-const stringArray: Check = (v) =>
-  isStringArray(v) ? ok() : bad("expected an array of non-empty strings");
-const nonEmptyStringArray: Check = (v) =>
-  isStringArray(v) && v.length > 0 ? ok() : bad("expected a non-empty array of strings");
-
-function enumCheck(values: readonly string[]): Check {
-  return (v) => (inSet(v, values) ? ok() : bad(`expected one of ${values.join("|")}`));
-}
-
-function chainCheck(v: unknown): string | null {
-  if (!Array.isArray(v) || v.length === 0) return bad("expected a non-empty array of {provider, model}");
-  for (const item of v) {
-    if (!isRecord(item) || typeof item.provider !== "string" || typeof item.model !== "string") {
-      return bad("each entry needs provider and model strings");
-    }
-    if (item.thinkingLevel !== undefined && !inSet(item.thinkingLevel, THINKING_LEVELS)) {
-      return bad(`thinkingLevel: expected ${THINKING_LEVELS.join("|")}`);
-    }
-    if (item.minTier !== undefined && !inSet(item.minTier, TIERS)) {
-      return bad(`minTier: expected ${TIERS.join("|")}`);
-    }
-    if (item.priority !== undefined && !isFiniteNumber(item.priority)) return bad("priority: expected a number");
-  }
-  return ok();
-}
-
-function recordOf(itemCheck: Check, label: string): Check {
-  return (v) => {
-    if (!isRecord(v)) return bad(`expected an object of ${label}`);
-    const keys = Object.keys(v);
-    if (keys.length === 0) return bad(`expected an object of ${label}`);
-    for (const [key, entry] of Object.entries(v)) {
-      const problem = itemCheck(entry);
-      if (problem) return bad(`${key}: ${problem}`);
-    }
-    return ok();
-  };
-}
-
-/**
- * 子項可為 `null`：**patch 層的 `null` = 刪掉該子鍵**（回預設／回自動
- * 派生，2026-10-02 解單向門）。檔案層的 `null` 仍有各自的值意涵（如
- * `ceilings.<tier>: null` = 無上限、`budget.dailyUsd: null` = 無上限），
- * 兩層不衝突：寫入器從不把刪除標記寫進檔案（直接移除該子鍵）。
- */
-function nullableItem(check: Check): Check {
-  return (v) => (v === null ? ok() : check(v));
-}
-
-const budgetCheck: Check = (v) => {
-  if (!isRecord(v)) return bad("expected an object");
-  const allowed = new Set(["dailyUsd", "monthlyUsd", "softRatio", "hardRatio"]);
-  for (const [key, value] of Object.entries(v)) {
-    if (!allowed.has(key)) return bad(`budget.${key}: unknown setting`);
-    if (key === "dailyUsd" || key === "monthlyUsd") {
-      if (value === null) continue;
-      if (!isFiniteNumber(value) || value <= 0) return bad(`budget.${key}: expected a number > 0, or null to clear the cap`);
-    } else if (!isFiniteNumber(value) || value < 0 || value > 1) {
-      return bad(`budget.${key}: expected a number within 0-1`);
-    }
-  }
-  return Object.keys(v).length > 0 ? ok() : bad("expected at least one of dailyUsd, monthlyUsd, softRatio, hardRatio");
-};
-
-const cacheCheck: Check = (v) => {
-  if (!isRecord(v)) return bad("expected an object");
-  const fields: Record<string, Check> = {
-    aware: bool,
-    deadband: (x) => (isFiniteNumber(x) && x >= 0 ? ok() : bad("expected a number >= 0")),
-    maxPenaltyUsd: (x) => (isFiniteNumber(x) && x >= 0 ? ok() : bad("expected a number >= 0")),
-    bypassTierDelta: (x) =>
-      isFiniteNumber(x) && x >= 0 && Number.isInteger(x) ? ok() : bad("expected an integer >= 0"),
-    cooldownSeconds: (x) => (isFiniteNumber(x) && x >= 0 ? ok() : bad("expected a number >= 0")),
-  };
-  for (const [key, value] of Object.entries(v)) {
-    const check = fields[key];
-    if (!check) return bad(`cache.${key}: unknown setting`);
-    const problem = check(value);
-    if (problem) return bad(`cache.${key}: ${problem}`);
-  }
-  return Object.keys(v).length > 0 ? ok() : bad(`expected at least one of ${Object.keys(fields).join(", ")}`);
-};
-
-const classifyCheck: Check = (v) => {
-  if (!isRecord(v)) return bad("expected an object");
-  const fields: Record<string, Check> = {
-    provider: enumCheck(PROVIDERS),
-    model: nonEmptyString,
-    python: nonEmptyString,
-    timeoutMs: (x) => (isFiniteNumber(x) && x >= 0 && Number.isInteger(x) ? ok() : bad("expected an integer >= 0")),
-    minPromptChars: (x) => (isFiniteNumber(x) && x >= 0 && Number.isInteger(x) ? ok() : bad("expected an integer >= 0")),
-    historyTurns: (x) => (isFiniteNumber(x) && x >= 0 && Number.isInteger(x) ? ok() : bad("expected an integer >= 0")),
-    cache: bool,
-    cacheTtlSeconds: (x) => (isFiniteNumber(x) && x >= 0 && Number.isInteger(x) ? ok() : bad("expected an integer >= 0")),
-    confidenceThreshold: (x) => (isFiniteNumber(x) && x >= 0 && x <= 1 ? ok() : bad("expected a number within 0-1")),
-    cloud: (x) =>
-      isRecord(x) && typeof x.provider === "string" && typeof x.model === "string"
-        ? ok()
-        : bad("expected {provider, model} strings"),
-  };
-  for (const [key, value] of Object.entries(v)) {
-    const check = fields[key];
-    if (!check) return bad(`classify.${key}: unknown setting`);
-    const problem = check(value);
-    if (problem) return bad(`classify.${key}: ${problem}`);
-  }
-  return Object.keys(v).length > 0 ? ok() : bad("expected at least one classify setting");
-};
-
-const displayCheck: Check = (v) => {
-  if (!isRecord(v)) return bad("expected an object");
-  const fields: Record<string, Check> = {
-    detail: enumCheck(DISPLAY_DETAILS),
-    color: enumCheck(DISPLAY_COLORS),
-    language: enumCheck(UI_LANGS),
-    badge: bool,
-    hint: bool,
-    rails: bool,
-    fields: (x) =>
-      isStringArray(x) && x.every((f) => (DISPLAY_FIELDS as readonly string[]).includes(f))
-        ? ok()
-        : bad(`expected a list of ${DISPLAY_FIELDS.join("|")}`),
-  };
-  for (const [key, value] of Object.entries(v)) {
-    const check = fields[key];
-    if (!check) return bad(`display.${key}: unknown setting`);
-    const problem = check(value);
-    if (problem) return bad(`display.${key}: ${problem}`);
-  }
-  return Object.keys(v).length > 0 ? ok() : bad("expected at least one display setting");
-};
-
-const PATCH_CHECKS: Record<string, Check> = {
-  enabled: bool,
-  useDefaultModels: bool,
-  autoRoutes: bool,
-  allowUnratedPicks: bool,
-  freeOnly: bool,
-  stickiness: bool,
-  mode: enumCheck(MODES),
-  modelPick: enumCheck(MODEL_PICKS),
-  profile: enumCheck(PROFILES),
-  classify: classifyCheck,
-  routes: recordOf(nullableItem(chainCheck), `per-tier model chains (${TIERS.join("|")})`),
-  kindModels: recordOf(nullableItem(chainCheck), "task-kind model chains"),
-  kindMinimumTier: recordOf(nullableItem(enumCheck(TIERS)), "task-kind -> tier"),
-  taskKinds: recordOf(
-    (v) =>
-      isRecord(v) && typeof v.label === "string" && isFiniteNumber(v.floor)
-        ? ok()
-        : bad("expected {label: string, floor: number}"),
-    "task-kind specs",
-  ),
-  xpremium: (v) =>
-    isRecord(v) && typeof v.enabled === "boolean" ? ok() : bad("expected {enabled: boolean}"),
-  freePool: (v) => {
-    if (!isRecord(v)) return bad("expected an object");
-    if (v.enabled !== undefined && typeof v.enabled !== "boolean") return bad("freePool.enabled: expected true or false");
-    if (v.models !== undefined) {
-      const problem = chainCheck(v.models);
-      if (problem) return bad(`freePool.models: ${problem}`);
-    }
-    return Object.keys(v).length > 0 ? ok() : bad("expected enabled and/or models");
-  },
-  suggest: (v) => (isRecord(v) && typeof v.scoresFile === "string" ? ok() : bad("expected {scoresFile: string}")),
-  budget: budgetCheck,
-  ceilings: recordOf(
-    (v) => (v === null || (isFiniteNumber(v) && v >= 0) ? ok() : bad("expected a number >= 0 or null")),
-    "per-tier ceilings",
-  ),
-  deny: stringArray,
-  allowProviders: stringArray,
-  prefer: recordOf(nullableItem(nonEmptyStringArray), "per-tier preferred models"),
-  cache: cacheCheck,
-  thinking: recordOf(nullableItem(enumCheck(THINKING_LEVELS)), "thinking pin"),
-  specialistPriority: recordOf(nullableItem(nonEmptyStringArray), "task-kind -> model id list"),
-  display: displayCheck,
-};
-
 /**
  * 寫入前驗證單一鍵值（Part 3.4）：白名單 + 型別/範圍檢查。
  * 回傳 `key: reason` 表示拒絕；通過則回傳 null。
  */
 export function validatePatch(key: string, value: unknown): string | null {
-  const check = PATCH_CHECKS[key];
-  if (!check) return `${key}: unknown setting (not in the whitelist)`;
-  const problem = check(value);
-  return problem ? `${key}: ${problem}` : null;
+  return validatePatchValue(key, value);
 }
 
 /**
@@ -906,7 +680,7 @@ function applyPatchToFile(file: Record<string, unknown>, patch: Record<string, u
 }
 
 /** 供文件與工具提示列出可寫鍵（Part 3.4）。 */
-export const WRITABLE_KEYS: readonly string[] = Object.keys(PATCH_CHECKS);
+export const WRITABLE_KEYS: readonly string[] = TOP_LEVEL_KEYS;
 
 /** 內建價格帶／能力下限／思考預設，供 Stage 2–3 與狀態列共用。 */
 export const POLICY_TABLES = { PROFILE_CEILINGS, TIER_CAPABILITY_FLOOR, TIER_THINKING } as const;

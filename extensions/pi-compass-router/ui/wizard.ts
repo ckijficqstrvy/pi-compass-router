@@ -16,7 +16,7 @@
 // 注入；未實作或回空 → 該項仍以內建預設為種子（不打字）。
 import { MODEL_FACTS, factsValid } from "../policy/facts.js";
 import { t, rawOf, setLang } from "./strings.js";
-import { DEFAULT_CONFIG, DISPLAY_DETAILS, DISPLAY_FIELDS, PROFILE_CEILINGS, TIERS } from "../schema.js";
+import { DEFAULT_CONFIG, DISPLAY_DETAILS, DISPLAY_FIELDS, PROFILE_CEILINGS, THINKING_LEVELS, TIERS } from "../schema.js";
 import type {
   CompassConfig,
   DisplayColor,
@@ -210,9 +210,6 @@ export function profileFromLabel(label: string): Profile | null {
   const token = label.trim().split(/\s+/)[0]?.toLowerCase();
   return token === "cheap" || token === "balanced" || token === "quality" ? token : null;
 }
-
-/** 思考層級全體（schema 的 `ThinkingLevel` 對應）。 */
-const THINKING_LEVELS: readonly ThinkingLevel[] = ["off", "minimal", "low", "medium", "high", "xhigh", "max"];
 
 /** 思考層級 → 顯示標籤。 */
 export function thinkingLabel(level: ThinkingLevel): string {

@@ -2,7 +2,7 @@
 //（SPEC Part 10.1「分數檔格式」節、移植 #12）。
 import { readFileSync } from "node:fs";
 import { MODEL_FACTS, factsValid, factFor } from "./policy/facts.js";
-import { TIER_CAPABILITY_FLOOR, type CompassConfig, type Target, type Tier } from "./schema.js";
+import { TIERS, TIER_CAPABILITY_FLOOR, type CompassConfig, type Target, type Tier } from "./schema.js";
 import { selectTargets } from "./route/select.js";
 
 /** 一條路由提議。 */
@@ -13,7 +13,7 @@ export interface Suggestion {
   reason: string;
 }
 
-const TIERS: readonly Tier[] = ["quick", "standard", "high", "premium", "xpremium"];
+/** 層級順序的唯一來源是 schema。 */
 
 function isTier(value: string): value is Tier {
   return (TIERS as readonly string[]).includes(value);

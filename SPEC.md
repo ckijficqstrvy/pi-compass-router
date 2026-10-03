@@ -319,6 +319,12 @@ hardRatio 的 `demand ≥ 2.5` 例外；層級 floor 直接決定候選鏈起點
 3. **Patch 非覆寫** — 只改被指定的鍵，預設值與衍生鏈**永不寫回使用者檔案**。
    `budget.dailyUsd: null` 清除上限。
 
+> **單一來源（2026-10-03 整理）**：白名單與型別/範圍/枚舉全部定義在
+> `config/patch.ts` 的 typebox schema；`WRITABLE_KEYS` 與 `config.json` 的
+> 頂層白名單都由它推導，`validatePatch` 委派 `validatePatchValue`。
+> 測試 `config.test.ts` 的 `VALID_SAMPLES` 把「嚴格放行 ⇒ 寬鬆解析不警告」
+> 固定下來，避免兩套驗證再分家。
+
 ---
 
 ## Part 4 — 分類後端
@@ -1177,6 +1183,7 @@ pi-compass/
 │   ├── schema.ts             # 型別、枚舉、預設值、白名單檢查（純）
 │   ├── config/
 │   │   ├── load.ts           # 三層解析、warnings、env 驗證
+│   │   ├── patch.ts          # 可寫鍵 typebox schema（白名單/驗證單一來源）
 │   │   └── env.ts            # COMPASS_* 定義與 parse
 │   ├── classify/
 │   │   ├── types.ts          # Classifier 介面、Judgment、ClassifyInput
