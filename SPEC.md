@@ -798,6 +798,11 @@ pressure = max(today÷dailyUsd, month÷monthlyUsd)
 - 上限是**政策非硬擋**：改路由，不擋回合
 - `0` 或 `null` → 移除該維度上限
 
+> **並發安全（2026-10-03 補）**：記帳是「讀-改-寫」，兩個 pi session
+> 同時寫會掉更新。現在以 `mkdir` 原子鎖（`state.json.lock`，逾時 2s
+> 視為持有者已死並搶回）互斥，並以 temp + `rename` 原子落檔；
+> 拿不到鎖仍會寫（best-effort），**記帳永不擋住回合**。
+
 ---
 
 ## Part 9 — 四層模型政策 [狀態：**已確認保留 — 2026-10-01**]

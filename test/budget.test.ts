@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, readFileSync, statSync, writeFileSync, rmSync, mkdirSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, utimesSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -169,4 +169,51 @@ test("an unreadable path never throws", () => {
 test("STATE_FILE is fixed under ~/.pi/agent/pi-compass", () => {
   assert.ok(STATE_FILE.endsWith(join(".pi", "agent", "pi-compass", "state.json")));
   assert.ok(readFileSync, "readFileSync is available");
+});
+// ---------------------------------------------------------------------------
+// 併發安全（2026-10-03）：讀-改-寫互斥 + 原子寫
+// ---------------------------------------------------------------------------
+
+test("recordSpend serialises through a lock dir and never leaves it behind", () => {
+  const dir = mkdtempSync(join(tmpdir(), "compass-budget-lock-"));
+  const file = join(dir, "state.json");
+  try {
+    recordSpend(1, new Date(), file);
+    recordSpend(2, new Date(), file);
+    const snapshot = loadSpend(new Date(), file);
+    assert.equal(snapshot.todayUsd, 3, "both writes accumulate");
+    assert.ok(!existsSync(`${file}.lock`), "lock is released");
+    assert.ok(!readdirSync(dir).some((name) => name.includes(".tmp-")), "no temp file left behind");
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("a fresh foreign lock does not make recordSpend throw (best-effort)", () => {
+  const dir = mkdtempSync(join(tmpdir(), "compass-budget-held-"));
+  const file = join(dir, "state.json");
+  try {
+    mkdirSync(`${file}.lock`);
+    assert.doesNotThrow(() => recordSpend(1, new Date(), file));
+    // 別人的鎖不該被我們拿掉。
+    assert.ok(existsSync(`${file}.lock`), "fresh foreign lock is respected");
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("a stale lock is reclaimed so accounting resumes", () => {
+  const dir = mkdtempSync(join(tmpdir(), "compass-budget-stale-"));
+  const file = join(dir, "state.json");
+  try {
+    mkdirSync(`${file}.lock`);
+    // 把鎖目錄 mtime 調老（> 2s），模擬持有者已死。
+    const old = new Date(Date.now() - 10_000);
+    utimesSync(`${file}.lock`, old, old);
+    recordSpend(4, new Date(), file);
+    assert.equal(loadSpend(new Date(), file).todayUsd, 4, "stale lock reclaimed and write landed");
+    assert.ok(!existsSync(`${file}.lock`), "released after use");
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
 });
