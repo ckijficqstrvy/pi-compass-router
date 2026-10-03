@@ -78,7 +78,10 @@ function toChoiceMap(questions: Record<string, { type: string; criteria?: unknow
  * - 計費：input tokens → `recordSpend`（output 免費，Part 4.3）。
  * - 快取：與 laya 同一 `ClassificationCache` 語意（Part 6.2）。
  */
-export function createCloudClassifier(config: CompassConfig): Classifier {
+export function createCloudClassifier(
+  config: CompassConfig,
+  options: { apiKey?: string; env?: Record<string, string | undefined> } = {},
+): Classifier {
   const provider = config.classify.cloud.provider;
   const model = config.classify.cloud.model;
   const cache = new ClassificationCache({
@@ -86,7 +89,8 @@ export function createCloudClassifier(config: CompassConfig): Classifier {
     ttlSeconds: config.classify.cacheTtlSeconds,
   });
   const generation = configGeneration(config.taskKinds, config.modelPick);
-  const apiKey = resolveApiKey();
+  // 金鑰可由呼叫端注入（測試 hermeticro：不依賴本機 ~/.pi auth.json）。
+  const apiKey = options.apiKey !== undefined ? options.apiKey : resolveApiKey(options.env);
 
   async function classify(input: ClassifyInput, signal: AbortSignal): Promise<Judgment> {
     // 快取查（Part 6.2）。

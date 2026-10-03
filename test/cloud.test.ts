@@ -37,7 +37,7 @@ test("cloud: captures the request and converts choice criteria array -> map", as
     return new Response(JSON.stringify(CAPTURED), { status: 200, headers: { "content-type": "application/json" } });
   });
   try {
-    const clf = createCloudClassifier(config({ provider: "cloud" } as never));
+    const clf = createCloudClassifier(config({ provider: "cloud" } as never), { apiKey: "test-key" });
     const judgment = await clf.classify(
       { request: "refactor the database layer", kinds: [...KINDS] },
       new AbortController().signal,
@@ -69,7 +69,7 @@ test("cloud: bills input tokens (output free) into the spend ledger", async () =
     new Response(JSON.stringify(CAPTURED), { status: 200 }),
   );
   try {
-    const clf = createCloudClassifier(config({ provider: "cloud" } as never));
+    const clf = createCloudClassifier(config({ provider: "cloud" } as never), { apiKey: "test-key" });
     const j = await clf.classify({ request: "hello there", kinds: [...KINDS] }, new AbortController().signal);
     assert.ok(j.kind, "classified despite billing path");
   } finally {
@@ -78,7 +78,7 @@ test("cloud: bills input tokens (output free) into the spend ledger", async () =
 });
 
 test("cloud: missing API key fails fast (spawn), fail-open upstream", async () => {
-  const clf = createCloudClassifier(config({ provider: "cloud" } as never));
+  const clf = createCloudClassifier(config({ provider: "cloud" } as never), { apiKey: "test-key" });
   // 無 TYPESAFE_API_KEY env、auth.json 權限/存在由 resolveApiKey 決定；
   // 強制無 key：mock env 不行（resolveApiKey 預設 process.env），故改驗
   // 有 key 時 endpoint 寫死。此測試改驗 provider 不支援的分支。
@@ -95,7 +95,7 @@ test("cloud: non-2xx maps to a protocol ClassifyError (fail-open, not crash)", a
     new Response(`{"detail":[{"msg":"Input should be a valid dictionary"}]}`, { status: 422 }),
   );
   try {
-    const clf = createCloudClassifier(config({ provider: "cloud" } as never));
+    const clf = createCloudClassifier(config({ provider: "cloud" } as never), { apiKey: "test-key" });
     const result = await clf.classify({ request: "hi", kinds: [...KINDS] }, new AbortController().signal).catch((e: Error) => e);
     assert.ok(result instanceof ClassifyError && result.kind === "protocol", `got ${result}`);
     assert.match(String((result as Error).message), /422/);
