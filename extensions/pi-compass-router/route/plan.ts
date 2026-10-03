@@ -108,6 +108,8 @@ export function planTurn(
   // 過期；未知價格不擋（fail-open）。
   const ceiling = ceilingFor(config, composed.tier);
   const priceOk = (candidate: Target): boolean => {
+    // Part 9 L3：顯式條目（使用者自己寫的）永不被政策過濾——價格天花板也一樣。
+    if (candidate.explicit) return true;
     if (ceiling === null) return true;
     const cost = deps.costOf(candidate);
     if (!cost) return true;

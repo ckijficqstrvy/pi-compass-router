@@ -60,7 +60,7 @@ test("scoresFromHistory: reverted-from loses, moved-to gains, chosen stays neutr
   const scores = scoresFromHistory(records);
   assert.ok(scores["p/good"].score > 0.5, "moved-to gains");
   assert.ok(scores["p/bad"].score < 0.5, "reverted-from loses");
-  assert.equal(scores["p/chosen"].score, 0.5, "chosen-only is neutral");
+  assert.ok(scores["p/chosen"].score > 0.5 && scores["p/chosen"].score < 0.75, "chosen is a weak positive (W11)");
   assert.match(scores["p/good"].note, /history \+2\/-0/);
 });
 

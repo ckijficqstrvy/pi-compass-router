@@ -662,6 +662,11 @@ mode 決定 Stage 5 動作：
 1. **可用性不在 `guard()` 裡**——`guard` 沒有 model registry 的存取權。
    可用性改由**呼叫端在候選鏈上做**：Stage 3 產出有序鏈，Stage 5/`apply`
    逐個試到第一個「存在且已認證」的模型。`guard()` 只處理 2–5 項。
+
+   **預算先於選鏈（W2 補，2026-10-03）**：`applyBudget()` 先依 pressure 決定
+   **有效層級**，`planTurn` 再依它重跑 Stage 3——預算降級必須真的換到便宜模型，
+   不是只改 entry 標籤。預算強制變更以 `budgetForced` 讓 deadband/cooldown 讓路；
+   `stickiness` 讀 `config.stickiness` 且不得遮蔽預算（W4）。
    行為不變，只是職責邊界寫明。
 2. **輸入型別**：`guard(request, state, config, mode)`，
    `request = { target, tier, demand }`——`demand` 是 hardRatio
@@ -705,6 +710,11 @@ mode 決定 Stage 5 動作：
 > `confirm` 的「詢問」由呼叫端（`index.ts`）負責：`applyRoute` 只回傳決策
 > 結果，**不阻塞等待使用者輸入**——詢問是 UI 層的事，`applyRoute` 是純資料
 > + hooks 套用。此為原規格缺口（confirm 誰問、何時問）的定案。
+>
+> **信心守衛（W9 補，2026-10-03）**：`kindConfidence < threshold` 時，kind 的
+> `taskKinds.floor` 與 `kindMinimumTier` **不再拉高 demand**（因此 thinking 階梯
+> 與 hard-ratio 的 `demand ≥ 2.5` 特赦都不繼承）；`kindMinimumTier` 仍作為 tier
+> 下限但**封頂在 standard**（安全中間值，只降不升）。
 
 ---
 
@@ -1219,6 +1229,8 @@ pi-compass/
 │   │   │                     #   （新增 2026-10-01：這三個函式原屬禁讀的
 │   │   │                     #   `jev.ts`，由本檔重新實作）
 │   │   ├── cache.ts          # 分類快取（Part 6.2）
+│   │   ├── history.ts        # 對話歷史擷取（historyTurns，W6）
+│   │   ├── flow.ts           # 兩階段分類（menu 模式，W5）
 │   │   ├── laya.ts           # 本機 bridge
 │   │   ├── cloud.ts          # cloud 後端（可替換 provider）
 │   │   └── server.py         # laya JSONL stdio
@@ -1232,6 +1244,7 @@ pi-compass/
 │   │   ├── facts.ts          # 事實查詢、band 切片（沿用你的原創）
 │   │   ├── model-facts.json  # 沿用你的原創
 │   │   └── filter.ts         # deny / allowProviders / prefer
+│   ├── target.ts             # Target/key 唯一 codec（W3）
 │   ├── budget.ts             # 記帳與壓力
 │   ├── decisions.ts          # 決策日誌（非內容欄位 JSONL，2026-10-03）
 │   ├── suggest.ts            # /compass suggest（本地分數檔）

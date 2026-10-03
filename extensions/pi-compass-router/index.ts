@@ -7,7 +7,7 @@ import { Type } from "typebox";
 
 import { loadConfig, validatePatch, writeConfigPatch } from "./config/load.js";
 import { loadSpend, recordSpend } from "./budget.js";
-import { planTurn, type CostRates } from "./route/plan.js";
+import { planTurn, type CostRates, type PlanDeps, type PlanSnapshot } from "./route/plan.js";
 import { compose } from "./route/compose.js";
 import { selectTargets, targetKey, tierOfModel } from "./route/select.js";
 import { applyRoute, type ApplyHooks } from "./route/apply.js";
@@ -97,6 +97,69 @@ function kindsOf(config: CompassConfig): readonly string[] {
  * 路由鉤子：每輪 agent 前跑 Stage 1–5（Part 5）。
  * **整段包 try/catch**——fail-open，任何异常不得擋住回合（Part 2）。
  */
+/** 回合環境快照（routeTurn 與 dry-run 共用；避免兩份接線漂移）。 */
+function snapshotFor(ctx: ExtensionContext, config: CompassConfig, state: SessionState): PlanSnapshot {
+  const current = currentTarget(ctx, config);
+  const spend = loadSpend();
+  return {
+    currentModel: current?.model ?? null,
+    currentTier: current?.tier ?? null,
+    lastSwitchAtMs: state.lastSwitchAtMs ?? null,
+    contextTokens: ctx.getContextUsage?.()?.tokens ?? null,
+    currentCost: costRatesOf(ctx.model),
+    todayUsd: spend.todayUsd,
+    monthUsd: spend.monthUsd,
+  };
+}
+
+/** PlanDeps（同上）。 */
+function depsFor(ctx: ExtensionContext): PlanDeps {
+  return {
+    isAvailable: (candidate) => resolveModel(ctx, candidate) !== undefined,
+    costOf: (candidate) => costRatesOf(resolveModel(ctx, candidate)),
+  };
+}
+
+/**
+ * W12（2026-10-03）：`/compass-route` 與 `compass_route` 的 dry-run——
+ * **真的拿文字去分類**（先前完全忽略輸入，永遠回 fallback standard），
+ * 再走 compose/select（有 ctx 時連 plan 的可用性與預算一起算），不切換。
+ */
+async function dryRun(
+  text: string,
+  state: SessionState,
+  ctx?: ExtensionContext,
+): Promise<string> {
+  const config = state.config;
+  const signal = ctx?.signal ?? AbortSignal.timeout(5000);
+  let judgment: Judgment | undefined;
+  if (state.classifier) {
+    judgment = await classifyInStages(
+      state.classifier,
+      {
+        request: text,
+        kinds: kindsOf(config),
+        conversation: ctx
+          ? conversationText((ctx.sessionManager?.getBranch?.() ?? []) as never, config.classify.historyTurns)
+          : undefined,
+      },
+      config,
+      signal,
+    );
+  }
+  const composed = compose(judgment, config);
+  const kind = judgment ? `kind ${judgment.kind} ${Math.round(judgment.kindConfidence * 100)}%` : "kind fallback";
+  if (!ctx) {
+    const selected = selectTargets(composed.tier, judgment, config);
+    const first = selected.picked ?? selected.chain[0];
+    return `${kind} · demand ${composed.demand.toFixed(2)} · tier ${composed.tier}${first ? ` → ${targetKey(first)}` : " → (no route)"}`;
+  }
+  const plan = planTurn(judgment, config, snapshotFor(ctx, config, state), depsFor(ctx));
+  const target = plan.target ? targetKey(plan.target) : "(no route available)";
+  const reason = plan.guard?.reason ? ` · ${plan.guard.reason}` : "";
+  return `${kind} · demand ${composed.demand.toFixed(2)} · tier ${plan.guard?.tier ?? composed.tier} → ${target}${reason}`;
+}
+
 async function routeTurn(
   pi: ExtensionAPI,
   ctx: ExtensionContext,
@@ -162,24 +225,7 @@ async function routeTurn(
   // 環境快照全部來自這裡（含 currentTier / lastSwitchAtMs / contextTokens /
   // 費率）——這正是 2026-10-03 前缺失、使 cache/cooldown 空轉的那段接線。
   const current = currentTarget(ctx, config);
-  const spend = loadSpend();
-  const plan = planTurn(
-    judgment,
-    config,
-    {
-      currentModel: current?.model ?? null,
-      currentTier: current?.tier ?? null,
-      lastSwitchAtMs: state.lastSwitchAtMs ?? null,
-      contextTokens: ctx.getContextUsage?.()?.tokens ?? null,
-      currentCost: costRatesOf(ctx.model),
-      todayUsd: spend.todayUsd,
-      monthUsd: spend.monthUsd,
-    },
-    {
-      isAvailable: (candidate) => resolveModel(ctx, candidate) !== undefined,
-      costOf: (candidate) => costRatesOf(resolveModel(ctx, candidate)),
-    },
-  );
+  const plan = planTurn(judgment, config, snapshotFor(ctx, config, state), depsFor(ctx));
 
   if (plan.unavailable || !plan.target || !plan.guard) {
     const skippedHooks = buildHooks(pi, ctx);
@@ -538,11 +584,9 @@ function registerCommands(pi: ExtensionAPI, state: SessionState): void {
   pi.registerCommand("compass-route", {
     description: tl(descLang, "/compass-route <text> 分類任意文字並顯示建議（不切換）"),
     handler: async (args, ctx) => {
-      if (!args.trim()) return ctx.ui.notify("compass-route: expected some text", "warning");
-      const composed = compose(undefined, state.config);
-      const selected = selectTargets(composed.tier, undefined, state.config);
-      const first = selected.picked ?? selected.chain[0];
-      ctx.ui.notify(first ? `→ ${composed.tier} ${targetKey(first)}` : "no route available", "info");
+      const text = args.trim();
+      if (!text) return ctx.ui.notify("compass-route: expected some text", "warning");
+      ctx.ui.notify(await dryRun(text, state, ctx), "info");
     },
   });
 }
@@ -595,14 +639,10 @@ function registerTools(pi: ExtensionAPI, state: SessionState): void {
     label: "compass route",
     description: "Classify arbitrary text and show the recommended tier + model (does not switch).",
     parameters: Type.Object({ text: Type.String({ description: "Text to classify" }) }),
-    async execute(_id, _params) {
-      const composed = compose(undefined, state.config);
-      const selected = selectTargets(composed.tier, undefined, state.config);
-      const target = selected.picked ?? selected.chain[0];
-      const text = target
-        ? `tier ${composed.tier} · demand ${composed.demand.toFixed(2)} → ${targetKey(target)}`
-        : "no route available";
-      return { content: [{ type: "text", text }], details: { tier: composed.tier, demand: composed.demand } };
+    async execute(_id, params) {
+      // W12：真的把 params.text 送進分類（先前忽略輸入）。
+      const text = await dryRun(String(params.text ?? ""), state);
+      return { content: [{ type: "text", text }], details: {} };
     },
   });
 

@@ -104,23 +104,32 @@ export function compose(judgment: Judgment | undefined, config: CompassConfig): 
   }
   demand = clamp(demand, 0, DEMAND_MAX);
 
+  // 信心守衛（W9，2026-10-03）：kind 不可信時，**所有由 kind 衍生的拉抬**
+  // （taskKinds floor、kindMinimumTier）都要撤回——否則會出現「tier 被壓回
+  // standard，但 demand 仍 2.5 → thinking 高、hard-ratio 還特赦」的矛盾。
+  const confident = judgment.kindConfidence >= config.classify.confidenceThreshold;
+
   // 種類的 demand floor（Part 3.1a）。
   const spec = config.taskKinds[judgment.kind];
-  if (spec) demand = Math.max(demand, spec.floor);
+  if (spec && confident) demand = Math.max(demand, spec.floor);
 
   // 種類的層級 floor 轉成數值下限（Part 5 Stage 2）。
   const kindTier = config.kindMinimumTier[judgment.kind];
-  if (kindTier) demand = Math.max(demand, TIER_DEMAND_FLOOR[kindTier]);
+  if (kindTier && confident) demand = Math.max(demand, TIER_DEMAND_FLOOR[kindTier]);
 
   let tier = tierFromDemand(demand, config.xpremium.enabled);
   if (kindTier) {
     // `xpremium` 未啟用時，種類的層級下限也封頂在 premium。
     const floor: Tier = kindTier === "xpremium" && !config.xpremium.enabled ? "premium" : kindTier;
-    tier = maxTier(tier, floor);
+    // 低信心：層級下限仍算數但**封頂在 standard**（不可信的 kind 不該把層級
+    // 拉高；保留它作 floor 是為了「寧可標準也不要 quick」的安全中間值）。
+    // 注意：這條只有 tier 效果——demand/thinking/budget 已在上面的 `confident`
+    // 判斷中撤回，三處不再互相矛盾（W9）。
+    tier = maxTier(tier, tierRank(floor) > tierRank("standard") ? "standard" : floor);
   }
 
-  // 信心守衛：優先於層級 floor（Part 5 Stage 2）。
-  if (judgment.kindConfidence < config.classify.confidenceThreshold && tierRank(tier) > tierRank("standard")) {
+  // 保底封頂（覆蓋 tierFromDemand 直接算出 >standard 的情況）。
+  if (!confident && tierRank(tier) > tierRank("standard")) {
     tier = "standard";
   }
 

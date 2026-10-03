@@ -505,3 +505,26 @@ test("apply: skipped without a target still applies thinking and writes the entr
   assert.equal(calls.entries[0].tier, null);
   assert.equal(calls.entries[0].reason, "continuation");
 });
+
+test("compose: low kind confidence withdraws the kind's demand and tier floors (W9)", () => {
+  const cfg = config({
+    classify: { ...DEFAULT_CONFIG.classify, confidenceThreshold: 0.5 },
+    taskKinds: { plan: { label: "Plan", floor: 2.5 } },
+    kindMinimumTier: { plan: "premium" },
+    thinking: {},
+  });
+  const low = compose(
+    { kind: "plan", kindConfidence: 0.2, complexity: 1.0, capability: 1.0, source: "laya", latencyMs: 1 },
+    cfg,
+  );
+  assert.equal(low.demand, 1.0, "kind floor withdrawn");
+  assert.equal(low.tier, "standard", "confidence cap");
+  assert.equal(low.thinking, "low", "thinking follows the withdrawn demand, not the kind floor");
+
+  const high = compose(
+    { kind: "plan", kindConfidence: 0.9, complexity: 1.0, capability: 1.0, source: "laya", latencyMs: 1 },
+    cfg,
+  );
+  assert.equal(high.demand, 2.9, "confident kinds keep their floor (kindMinimumTier premium)");
+  assert.equal(high.tier, "premium");
+});

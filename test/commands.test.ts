@@ -217,3 +217,21 @@ test("confirm no writes exactly one cancelled entry and never switches (W7)", as
     cleanup();
   }
 });
+
+test("/compass-route classifies the given text (and rejects empty input) (W12)", async () => {
+  const { commands, ctx, notices, cleanup } = await boot();
+  try {
+    notices.length = 0;
+    await commands["compass"].handler("", ctx); // 先熱一下狀態（與本測試無關）
+    await commands["compass-route"].handler("refactor this module with tests", ctx);
+    const preview = notices.map((n) => n.message).join("\n");
+    assert.match(preview, /kind (fallback|\w+) · demand [\d.]+ · tier (quick|standard|high|premium|xpremium)/, preview);
+    assert.match(preview, /→/, "shows a target or (no route available)");
+
+    notices.length = 0;
+    await commands["compass-route"].handler("   ", ctx);
+    assert.match(notices[0]?.message ?? "", /expected some text/);
+  } finally {
+    cleanup();
+  }
+});

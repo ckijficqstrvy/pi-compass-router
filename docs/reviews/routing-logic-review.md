@@ -220,3 +220,25 @@
 - [budget.ts](file:///Users/ethan/dev/pi-compass/extensions/pi-compass-router/budget.ts)
 - [index.ts](file:///Users/ethan/dev/pi-compass/extensions/pi-compass-router/index.ts)
 - [指定測試目錄](file:///Users/ethan/dev/pi-compass/test/)
+
+---
+
+## Resolution (2026-10-03, by the implementing agent)
+
+All twelve findings were addressed in commits `704b6a8`, `7e58b61`, `a84fdc0`
+and the follow-ups below; `npm test` 323 pass, `accept.sh` 8/8, typecheck clean.
+
+| # | Finding | Resolution |
+|---|---|---|
+| W1 | assistant cost never billed | `message_end` → `recordSpend(usage.cost.total)`; integration test asserts the ledger |
+| W2 | budget relabelled tier only | `applyBudget()` runs before selection; `planTurn` reselects; entry/cost agree |
+| W3 | prefer heads dropped (empty provider) | single `target.ts` codec; prefer parsed to provider/model; bare ids resolve uniquely |
+| W4 | stickiness ignored config and masked budget | guard honours `config.stickiness`; budget is applied first |
+| W5 | menu built from fallback standard | two-stage classification (`classify/flow.ts`); second pass uses the real tier menu |
+| W6 | historyTurns unwired; cache key blind | `classify/history.ts` sends the last N turns (4000-char cap); conversation+menu join the cache key (v=2) |
+| W7 | confirm wrote phantom entries and wrong state | one final outcome (applied/cancelled/failed) drives entry, state and log; cancelled is logged as cancelled |
+| W8 | static facts only; cross-provider fallback | `factFor` requires exact provider (bare id only when unique); runtime registry price re-check in `planTurn` |
+| W9 | low confidence still trusted kind floors | demand/thinking/budget no longer inherit kind floors; tier floor capped at standard |
+| W10 | skipped paths bypassed Stage 5 | continuation/no-route run through `applyRoute` (thinking applied, one pipeline) |
+| W11 | suggest score ignored `chosen` | chosen counts as a weak positive (0.5 weight) |
+| W12 | /compass-route ignored its text | command and tool run a real dry-run (Stage 1–4, no switch) |

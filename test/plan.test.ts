@@ -293,3 +293,23 @@ test("stickiness does not mask budget pressure (W4)", () => {
   assert.equal(plan.target?.model, "cheap-x");
   assert.equal(plan.guard?.outcome, "applied", "budget must not be masked by stickiness");
 });
+
+test("an explicit target is never filtered by the runtime price ceiling (Part 9 L3)", () => {
+  const config = configWith({ ceilings: { standard: 2 } });
+  const expensive = { input: 5, output: 5, cacheRead: 0, cacheWrite: 0 };
+  // configWith 的 B 非 explicit → 被 runtime 價格擋；explicit 版本則豁免。
+  const plan = planTurn(judgmentFor(1.9), config, snapshotWith({ currentTier: null }), {
+    isAvailable: () => true,
+    costOf: () => expensive,
+  });
+  const explicitConfig = configWith({
+    ceilings: { standard: 2 },
+    routes: { quick: [], standard: [{ provider: "openrouter", model: "standard-model", explicit: true }], high: [], premium: [], xpremium: [] },
+  });
+  const kept = planTurn(judgmentFor(1.9), explicitConfig, snapshotWith({ currentTier: null }), {
+    isAvailable: () => true,
+    costOf: () => ({ input: 5, output: 5, cacheRead: 0, cacheWrite: 0 }),
+  });
+  assert.equal(plan.unavailable, true, "non-explicit target is still price-filtered");
+  assert.equal(kept.target?.model, "standard-model", "explicit target survives");
+});

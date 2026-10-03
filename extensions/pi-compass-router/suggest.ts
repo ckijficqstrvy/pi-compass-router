@@ -39,8 +39,11 @@ function isRecord(value: unknown): value is Record<string, unknown> {
  * - `type: "route"` 且 outcome 為 `applied`／`held` → 該模型 `chosen +1`；
  * - `type: "feedback"` → `from` 記負（離開它 = 不滿意）、`to` 記正（換過去 = 偏好）。
  *
- * `score = 0.5 + 0.5 × (pos − neg) / (pos + neg + 1)`——落在 (0,1)，
- * 無正負證據的模型回 0.5（中性）。**只給有事件的模型**。
+ * `chosen` 以**弱權重 0.5** 計入正訊號（W11）：正常使用沒有 revert 也是一種
+ * 「可接受」；否則自動校準學不到任何偏好。
+ *
+ * `score = 0.5 + 0.5 × (pos + 0.5×chosen − neg) / (pos + 0.5×chosen + neg + 1)`
+ * ——落在 (0,1)；完全沒有事件的模型不會出現在表裡。
  */
 export function scoresFromHistory(records: readonly DecisionRecord[]): Record<string, { score: number; note: string }> {
   const pos = new Map<string, number>();
@@ -65,8 +68,9 @@ export function scoresFromHistory(records: readonly DecisionRecord[]): Record<st
     const p = pos.get(key) ?? 0;
     const n = neg.get(key) ?? 0;
     const c = chosen.get(key) ?? 0;
+    const positive = p + 0.5 * c;
     out[key] = {
-      score: 0.5 + (0.5 * (p - n)) / (p + n + 1),
+      score: 0.5 + (0.5 * (positive - n)) / (positive + n + 1),
       note: `history +${p}/-${n} · chosen ${c}`,
     };
   }
