@@ -4,8 +4,8 @@
 // 真延遲由 test/latency.ts 另驗（Part 4.2 橋接契約節）。
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { existsSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
 
 import { createLayaClassifier } from "../extensions/pi-compass-router/classify/laya.js";
@@ -15,8 +15,12 @@ import type { CompassConfig } from "../extensions/pi-compass-router/schema.js";
 
 const dir = mkdtempSync(join(tmpdir(), "laya-test-"));
 
-/** 真 venv python（跑假 .py 腳本用）——本機 laya 環境（批次 C）。 */
-const VENV_PYTHON = "/Users/ethan/.pi/agent/pi-compass/venv/bin/python";
+/**
+ * 跑假 .py 腳本用的 python：優先用本機 laya venv，找不到就用 PATH 的 python3。
+ * （不可硬編碼使用者家目錄路徑——那讓測試只能在作者機器上過，CI 終結此依賴。）
+ */
+const LOCAL_VENV_PYTHON = join(homedir(), ".pi", "agent", "pi-compass", "venv", "bin", "python");
+const VENV_PYTHON = process.env.COMPASS_TEST_PYTHON ?? (existsSync(LOCAL_VENV_PYTHON) ? LOCAL_VENV_PYTHON : "python3");
 
 function config(overrides: Partial<CompassConfig["classify"]> = {}): CompassConfig {
   return { ...DEFAULT_CONFIG, classify: { ...DEFAULT_CONFIG.classify, ...overrides } } as CompassConfig;
