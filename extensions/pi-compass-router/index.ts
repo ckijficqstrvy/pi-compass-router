@@ -524,7 +524,7 @@ async function showStatus(ctx: ExtensionContext, state: SessionState, why = fals
 async function showSuggest(ctx: ExtensionContext, state: SessionState): Promise<void> {
   try {
     const list = await suggest(state.config);
-    if (list.length === 0) return ctx.ui.notify("no suggestions (set suggest.scoresFile)", "info");
+    if (list.length === 0) return ctx.ui.notify(tl(state.config.display.language, "尚未設定建議分數檔——用 /compass-set ⑤ 指定 JSON 路徑"), "info");
     ctx.ui.notify(list.map((s) => `${s.tier} ${targetKey(s.target)} — ${s.reason}`).join("\n"), "info");
   } catch (error) {
     ctx.ui.notify(error instanceof Error ? error.message : String(error), "error");

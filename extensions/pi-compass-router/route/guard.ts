@@ -134,7 +134,13 @@ export function guard(
     config.cache.aware &&
     state.cachePenaltyUsd !== undefined &&
     state.cachePenaltyUsd > config.cache.maxPenaltyUsd &&
-    !bypass
+    !bypass &&
+    // 2026-10-03 校準：cache penalty 只抑制「同層互換與降級」。
+    // 明確的升級是路由器的目的，且固定 USD 上限會隨 context 變大而失效
+    // （60k tokens 就會擋掉 $1/M 升級）——不讓一次性 cache 成本擋升級。
+    // 目前層級未知 → 不套（fail-open，與首次不套 deadband 一致）。
+    state.currentTier !== null &&
+    rank(tier) <= rank(state.currentTier)
   ) {
     return {
       outcome: "held",

@@ -323,8 +323,11 @@ hardRatio 的 `demand ≥ 2.5` 例外；層級 floor 直接決定候選鏈起點
 > **單一來源（2026-10-03 整理）**：白名單與型別/範圍/枚舉全部定義在
 > `config/patch.ts` 的 typebox schema；`WRITABLE_KEYS` 與 `config.json` 的
 > 頂層白名單都由它推導，`validatePatch` 委派 `validatePatchValue`。
-> 測試 `config.test.ts` 的 `VALID_SAMPLES` 把「嚴格放行 ⇒ 寬鬆解析不警告」
-> 固定下來，避免兩套驗證再分家。
+> **物件鍵的解析也吃同一份 schema**（`applyObjectKey`：classify/display/
+> budget/cache），不再手寫第二套檢查；具特殊語意的鍵（routes/kindModels/
+> taskKinds/freePool/ceilings/prefer/thinking/kindMinimumTier/specialistPriority）
+> 維持各自套用邏輯。測試 `config.test.ts` 的 `VALID_SAMPLES` 把
+> 「嚴格放行 ⇒ 寬鬆解析不警告」固定下來。
 
 ---
 
@@ -771,6 +774,9 @@ batched independently，batch_size 預設 16），故五題成本接近一題而
 
 - **估算**：`contextTokens × (new.input + new.cacheWrite − current.cacheRead)`
 - `> cache.maxPenaltyUsd` → 擋下切換（`bypassTierDelta` 可越過）
+- **只擋同層互換與降級**（2026-10-03 校準）：明確的層級升級不受 cache penalty
+  限制（升級是路由器的目的；固定 USD 上限會隨 context 變大而失效——60k tokens
+  就會擋掉 $1/M 升級）。目前層級未知 → 不套（fail-open，與首次不套 deadband 一致）。
 - **deadband**：demand 需超出當前層 ±`deadband` 才換層
 - **大跳豁免**：層級差 ≥ `bypassTierDelta` → 無條件切
 - **同層專家互換**（如 Sonnet ↔ Codex）仍是模型變更，同樣計價
@@ -1054,7 +1060,7 @@ interface WizardHooks {
 | ② 預算與花費 | `budget.dailyUsd/monthlyUsd`（無上限／沿用目前／預設檔位＋自訂）、`budget.softRatio/hardRatio`（**新增**：0.5–0.95 預設）、`profile`（**三種定義印在選項上**，`profileLabel`）、`freeOnly` |
 | ③ 模型與層級 | `routes.<tier>`（設為首選…／放到末尾…／移除…／**改回自動（清除你寫的）**／自訂整條字串…；**只寫被改的那一層**）、`kindModels.<kind>`（**新增**，同款動作＋改回層級鏈）、`prefer.<tier>`（**新增**，含清除）、`kindMinimumTier`、`xpremium.enabled`、`useDefaultModels` |
 | ④ 分類器 | `classify.provider`（選項講清楚用哪個分類器，帶目前模型）、`classify.model`/`classify.cloud.*`（laya → HF 快取；cloud → **只放 `provider=typesafe`**；內建預設當種子）、`classify.cache/cacheTtlSeconds`、`classify.timeoutMs/confidenceThreshold/minPromptChars/historyTurns`（**新增**：預設檔位＋自訂） |
-| ⑤ 政策與過濾 | `deny`/`allowProviders`（`✓`/`✗` 切換＋新增 glob）、`ceilings.<tier>`（**新增**：依 profile／各帶檔位／自訂／**清除**） |
+| ⑤ 政策與過濾 | `deny`/`allowProviders`（`✓`/`✗` 切換＋新增 glob）、`ceilings.<tier>`（依 profile／各帶檔位／自訂／**清除**）、`suggest.scoresFile`（**2026-10-03**：指定/清除 `/compass suggest` 的分數檔路徑） |
 | ⑥ 顯示與呈現 | `display.detail`（三檔帶白話說明）、`display.fields`（`✓`/`✗` 切換迴圈，「← 完成」一次性落檔；加回依固定順序）、`display.badge`、`display.color`（rich/mono）、`display.hint`、`display.rails`、`display.language`（中文／English，切換後選單立即換語言） |
 | ⑦ 重設・診斷 | `重設某項回預設`（含 `routes`/`kindModels` 整組回自動、`display`）、**測試分類器**（跑一輪真分類不切換，`hooks.probeClassifier`）、**看鏈的來源**（逐條標來源＋事實檔日期） |
 
@@ -1062,7 +1068,7 @@ interface WizardHooks {
 
 | 鍵 | 不給的理由 |
 | --- | --- |
-| `suggest.scoresFile` | 檔案路徑，**沒有候選來源**也無法驗證存在；偶爾設一次，留 config.json／工具。 |
+| `suggest.scoresFile` | 檔案路徑，無法枚舉候選；**2026-10-03 起可在 `/compass-set` ⑤ 指定/清除**（打字輸入路徑）。 |
 | `classify.python` | 同上（Python 直譯器路徑）；改 config.json。 |
 | `taskKinds` `specialistPriority` `freePool` | 結構化手工資料（分類定義／模型池），列了也只是讓人誤選；改用 config.json。 |
 
@@ -1228,7 +1234,8 @@ pi-compass/
 │   ├── suggest.ts            # /compass suggest（本地分數檔）
 │   └── ui/
 │       ├── wizard.ts         # /compass-set 對外窗口（2026-10-03 拆檔）
-│       ├── wizard/           # labels / items / edit / run / types
+│       ├── wizard/           # labels / items / run / types
+│       ├── wizard/edit/      # routing / budget / models / classifier / policy / display / diagnostics / shared
 │       ├── entries.ts        # entry 檢視模型 + 純文字渲染
 │       ├── entry-card.ts     # entry 主題化卡片（Tone → theme token）
 │       ├── strings.ts        # zh/en 字典（t/tl/tr、rawOf）

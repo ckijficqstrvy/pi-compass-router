@@ -3,6 +3,7 @@ import { t } from "./i18n.js";
 import { DISPLAY_FIELDS, TIERS, type CompassConfig } from "../../schema.js";
 import {
   chainSummary,
+  clip,
   factsDate,
   money,
   modeLabel,
@@ -52,6 +53,7 @@ export type MenuItem =
   | "classifyNums"
   | "filters"
   | "ceilings"
+  | "scoresFile"
   | "detail"
   | "fields"
   | "badge"
@@ -68,7 +70,7 @@ export const GROUP_ITEMS: Readonly<Record<Group, readonly MenuItem[]>> = {
   budget: ["daily", "monthly", "ratios", "profile", "freeOnly"],
   models: ["chains", "kindModels", "prefer", "kindTiers", "xpremium", "useDefaultModels"],
   classifier: ["provider", "checkpoint", "classifyCache", "classifyNums"],
-  policy: ["filters", "ceilings"],
+  policy: ["filters", "ceilings", "scoresFile"],
   display: ["detail", "fields", "badge", "color", "hint", "rails", "uiLang"],
   diagnostics: ["reset", "testClassifier", "chainSource"],
 };
@@ -99,6 +101,7 @@ export const ITEM_NAMES: Readonly<Record<MenuItem, string>> = {
   classifyNums: "分類參數",
   filters: "過濾規則",
   ceilings: "價格天花板",
+  scoresFile: "建議分數檔",
   detail: "呈現密度",
   fields: "收合列欄位",
   badge: "compass 徽章",
@@ -186,7 +189,8 @@ export function renderItemRow(item: MenuItem, config: CompassConfig): string {
     }
     case "kindTiers": {
       const parts = Object.entries(config.kindMinimumTier).map(([kind, tier]) => `${kind}≥${tier}`);
-      return `${name}${pad}${parts.join(" · ")}`;
+      // 10 種類的完整清單在 80 欄會折行；截斷保留前段可讀性。
+      return `${name}${pad}${clip(parts.join(" · "), 58)}`;
     }
     case "xpremium":
       return t`${name}${pad}${onOff(config.xpremium.enabled)}（premium 之上再一層）`;
@@ -211,8 +215,10 @@ export function renderItemRow(item: MenuItem, config: CompassConfig): string {
       const count = Object.keys(config.ceilings).length;
       return `${name}${pad}${count === 0 ? t("依 profile 價格帶") : t`${count} 層自訂`}`;
     }
+    case "scoresFile":
+      return `${name}${pad}${config.suggest.scoresFile === "" ? t("未設定") : config.suggest.scoresFile}`;
     case "detail":
-      return t`${name}${pad}${config.display.detail}（${DETAIL_HINT[config.display.detail]()}）`;
+      return t`${name}${pad}${config.display.detail} · ${DETAIL_HINT[config.display.detail]()}`;
     case "fields": {
       const shown = config.display.fields;
       const chips = DISPLAY_FIELDS.map((f) => (shown.includes(f) ? f : `-${f}`)).join(" ");

@@ -121,7 +121,7 @@ test("cache penalty holds when the estimated miss cost exceeds the cap", () => {
   const plan = planTurn(
     judgmentFor(1.9),
     configWith(),
-    snapshotWith({ currentTier: null, contextTokens, currentCost: { input: 0, cacheRead: 0, cacheWrite: 0 } }),
+    snapshotWith({ currentTier: "high", contextTokens, currentCost: { input: 0, cacheRead: 0, cacheWrite: 0 } }),
     { isAvailable: () => true, costOf: () => nextCost },
   );
   assert.equal(plan.guard?.outcome, "held");
@@ -170,4 +170,43 @@ test("tierOfModel maps a priced fact to a tier and unknown models to null", () =
     assert.ok(tier !== null, "a priced fact must land in some tier");
   }
   assert.equal(tierOfModel(DEFAULT_CONFIG, "openrouter", "no-such-model-xyz"), null);
+});
+
+// ---------------------------------------------------------------------------
+// cache penalty 校準（2026-10-03）：只擋同層互換/降級，不擋升級
+// ---------------------------------------------------------------------------
+
+const hugeNext: CostRates = { input: 10, cacheRead: 0, cacheWrite: 0 };
+const zeroCurrent: CostRates = { input: 0, cacheRead: 0, cacheWrite: 0 };
+
+test("cache penalty does not block an explicit tier upgrade", () => {
+  const plan = planTurn(
+    judgmentFor(1.9), // → standard（高於 currentTier quick）
+    configWith(),
+    snapshotWith({ currentTier: "quick", contextTokens: 100_000, currentCost: zeroCurrent }),
+    { isAvailable: () => true, costOf: () => hugeNext },
+  );
+  assert.equal(plan.guard?.outcome, "applied", "upgrade must not be cache-penalised");
+  assert.ok((plan.cacheMissUsd ?? 0) > 0.05, "estimate still reported");
+});
+
+test("cache penalty holds a same-or-lower tier move", () => {
+  const plan = planTurn(
+    judgmentFor(1.9), // → standard（低於 currentTier premium）
+    configWith(),
+    snapshotWith({ currentTier: "high", contextTokens: 100_000, currentCost: zeroCurrent }),
+    { isAvailable: () => true, costOf: () => hugeNext },
+  );
+  assert.equal(plan.guard?.outcome, "held");
+  assert.match(String(plan.guard?.reason), /cache miss/);
+});
+
+test("unknown current tier skips the cache penalty (fail-open)", () => {
+  const plan = planTurn(
+    judgmentFor(1.9),
+    configWith(),
+    snapshotWith({ currentTier: null, contextTokens: 100_000, currentCost: zeroCurrent }),
+    { isAvailable: () => true, costOf: () => hugeNext },
+  );
+  assert.equal(plan.guard?.outcome, "applied");
 });

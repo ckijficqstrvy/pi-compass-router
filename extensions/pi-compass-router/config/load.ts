@@ -5,7 +5,8 @@ import { basename, dirname, join } from "node:path";
 import { COMPASS_ENV_MAP, parseEnvOverrides, type EnvPatch } from "./env.js";
 import { MODEL_FACTS, factsValid, rankedFacts, sliceBands } from "../policy/facts.js";
 import { ceilingFor, filterChain, insertPrefer } from "../policy/filter.js";
-import { TOP_LEVEL_KEYS, validatePatchValue } from "./patch.js";
+import { PATCH_SCHEMA, TOP_LEVEL_KEYS, validatePatchValue } from "./patch.js";
+import { Value } from "typebox/value";
 import {
   MODES,
   MODEL_PICKS,
@@ -110,6 +111,44 @@ function mergeTarget(base: Target[], incoming: unknown, where: string, warnings:
  * 2. **Patch 非覆寫** — 只改被指定的鍵；預設值與衍生鏈不寫回
  * 3. **寫前驗證** — 型別不符就留在前一層的值，並具名警告
  */
+/**
+ * 物件鍵的通用套用引擎（2026-10-03）：以 `PATCH_SCHEMA` 的葉子 schema 驗證並
+ * 逐子鍵合併。先前 classify/display/budget/cache 各有一段手寫檢查，與 schema
+ * 並存會漂移；現在同一份 schema 既管寫入驗證（validatePatchValue）也管解析。
+ * 未知子鍵與不合法值都只警告、不放棄其他子鍵（寬鬆解析的既有語意）。
+ */
+function applyObjectKey(
+  target: Record<string, unknown>,
+  key: string,
+  value: unknown,
+  warnings: string[],
+): void {
+  if (!isRecord(value)) {
+    warnings.push(`config.json: ${key} must be an object — ignored`);
+    return;
+  }
+  const properties =
+    (PATCH_SCHEMA[key] as { properties?: Record<string, import("typebox").TSchema> }).properties ?? {};
+  for (const [sub, subValue] of Object.entries(value)) {
+    const leaf = properties[sub];
+    if (!leaf) {
+      warnings.push(`config.json: unknown key "${key}.${sub}" dropped`);
+      continue;
+    }
+    if (!Value.Check(leaf, subValue)) {
+      warnings.push(`config.json: ${key}.${sub} invalid — ignored`);
+      continue;
+    }
+    // display.fields 去重（保序）——舊手寫解析的行為，測試固定住了。
+    if (key === "display" && sub === "fields" && Array.isArray(subValue)) {
+      const seen = new Set<string>();
+      target[sub] = subValue.filter((field) => typeof field === "string" && !seen.has(field) && (seen.add(field), true));
+      continue;
+    }
+    target[sub] = subValue;
+  }
+}
+
 function applyFilePatch(
   base: CompassConfig,
   patch: Record<string, unknown>,
@@ -174,78 +213,12 @@ function applyFilePatch(
         if (inSet(value, PROFILES)) next.profile = value as CompassConfig["profile"];
         else warnings.push(`config.json: profile must be one of ${PROFILES.join("|")} — ignored`);
         break;
-      case "classify": {
-        if (!isRecord(value)) {
-          warnings.push("config.json: classify must be an object — ignored");
-          break;
-        }
-        for (const [ck, cv] of Object.entries(value)) {
-          if (ck === "provider") {
-            if (inSet(cv, PROVIDERS)) next.classify.provider = cv as CompassConfig["classify"]["provider"];
-            else warnings.push(`config.json: classify.provider must be ${PROVIDERS.join("|")} — ignored`);
-          } else if (ck === "model" || ck === "python") {
-            if (typeof cv === "string" && cv.trim()) next.classify[ck] = cv.trim();
-            else warnings.push(`config.json: classify.${ck} must be a non-empty string — ignored`);
-          } else if (ck === "cloud") {
-            if (isRecord(cv) && typeof cv.provider === "string" && typeof cv.model === "string") {
-              next.classify.cloud = { provider: cv.provider, model: cv.model };
-            } else warnings.push("config.json: classify.cloud needs provider+model strings — ignored");
-          } else if (ck === "timeoutMs" || ck === "minPromptChars" || ck === "historyTurns" || ck === "cacheTtlSeconds") {
-            if (isFiniteNumber(cv) && cv >= 0 && Number.isInteger(cv)) {
-              if (ck === "timeoutMs") next.classify.timeoutMs = cv;
-              else if (ck === "minPromptChars") next.classify.minPromptChars = cv;
-              else if (ck === "historyTurns") next.classify.historyTurns = cv;
-              else next.classify.cacheTtlSeconds = cv;
-            } else warnings.push(`config.json: classify.${ck} must be an integer >= 0 — ignored`);
-          } else if (ck === "cache") {
-            if (typeof cv === "boolean") next.classify.cache = cv;
-            else warnings.push("config.json: classify.cache must be a boolean — ignored");
-          } else if (ck === "confidenceThreshold") {
-            if (isFiniteNumber(cv) && cv >= 0 && cv <= 1) next.classify.confidenceThreshold = cv;
-            else warnings.push("config.json: classify.confidenceThreshold must be within 0-1 — ignored");
-          } else {
-            warnings.push(`config.json: unknown key "classify.${ck}" dropped`);
-          }
-        }
+      case "classify":
+        applyObjectKey(next.classify as unknown as Record<string, unknown>, "classify", value, warnings);
         break;
-      }
-      case "display": {
-        if (!isRecord(value)) {
-          warnings.push("config.json: display must be an object — ignored");
-          break;
-        }
-        for (const [dk, dv] of Object.entries(value)) {
-          if (dk === "detail") {
-            if (inSet(dv, DISPLAY_DETAILS)) next.display.detail = dv as CompassConfig["display"]["detail"];
-            else warnings.push(`config.json: display.detail must be ${DISPLAY_DETAILS.join("|")} — ignored`);
-          } else if (dk === "color") {
-            if (inSet(dv, DISPLAY_COLORS)) next.display.color = dv as CompassConfig["display"]["color"];
-            else warnings.push(`config.json: display.color must be ${DISPLAY_COLORS.join("|")} — ignored`);
-          } else if (dk === "badge" || dk === "hint" || dk === "rails") {
-            if (typeof dv === "boolean") next.display[dk] = dv;
-            else warnings.push(`config.json: display.${dk} must be a boolean — ignored`);
-          } else if (dk === "language") {
-            if (inSet(dv, UI_LANGS)) next.display.language = dv as CompassConfig["display"]["language"];
-            else warnings.push(`config.json: display.language must be ${UI_LANGS.join("|")} — ignored`);
-          } else if (dk === "fields") {
-            if (isStringArray(dv) && dv.every((f) => (DISPLAY_FIELDS as readonly string[]).includes(f))) {
-              const seen = new Set<string>();
-              const fields: DisplayField[] = [];
-              for (const f of dv) {
-                if (seen.has(f)) continue;
-                seen.add(f);
-                fields.push(f as DisplayField);
-              }
-              next.display.fields = fields;
-            } else {
-              warnings.push(`config.json: display.fields must be a list of ${DISPLAY_FIELDS.join("|")} — ignored`);
-            }
-          } else {
-            warnings.push(`config.json: unknown key "display.${dk}" dropped`);
-          }
-        }
+      case "display":
+        applyObjectKey(next.display as unknown as Record<string, unknown>, "display", value, warnings);
         break;
-      }
       case "routes": {
         if (!isRecord(value)) {
           warnings.push("config.json: routes must be an object — ignored");
@@ -330,25 +303,9 @@ function applyFilePatch(
         if (isRecord(value) && typeof value.scoresFile === "string") next.suggest.scoresFile = value.scoresFile;
         else warnings.push("config.json: suggest needs {scoresFile: string} — ignored");
         break;
-      case "budget": {
-        if (!isRecord(value)) {
-          warnings.push("config.json: budget must be an object — ignored");
-          break;
-        }
-        for (const [bk, bv] of Object.entries(value)) {
-          if (bk === "dailyUsd" || bk === "monthlyUsd") {
-            if (bv === null) next.budget[bk] = null;
-            else if (isFiniteNumber(bv) && bv >= 0) next.budget[bk] = bv;
-            else warnings.push(`config.json: budget.${bk} must be a number >= 0 or null to clear — ignored`);
-          } else if (bk === "softRatio" || bk === "hardRatio") {
-            if (isFiniteNumber(bv) && bv >= 0 && bv <= 1) next.budget[bk] = bv;
-            else warnings.push(`config.json: budget.${bk} must be within 0-1 — ignored`);
-          } else {
-            warnings.push(`config.json: unknown key "budget.${bk}" dropped`);
-          }
-        }
+      case "budget":
+        applyObjectKey(next.budget as unknown as Record<string, unknown>, "budget", value, warnings);
         break;
-      }
       case "ceilings":
         if (!isRecord(value)) {
           warnings.push("config.json: ceilings must be an object — ignored");
@@ -380,30 +337,9 @@ function applyFilePatch(
           } else warnings.push(`config.json: prefer.${tier} must be a non-empty string array — ignored`);
         }
         break;
-      case "cache": {
-        if (!isRecord(value)) {
-          warnings.push("config.json: cache must be an object — ignored");
-          break;
-        }
-        for (const [ck, cv] of Object.entries(value)) {
-          if (ck === "aware") {
-            if (typeof cv === "boolean") next.cache.aware = cv;
-            else warnings.push("config.json: cache.aware must be a boolean — ignored");
-          } else if (ck === "deadband" || ck === "maxPenaltyUsd" || ck === "cooldownSeconds") {
-            if (isFiniteNumber(cv) && cv >= 0) {
-              if (ck === "deadband") next.cache.deadband = cv;
-              else if (ck === "maxPenaltyUsd") next.cache.maxPenaltyUsd = cv;
-              else next.cache.cooldownSeconds = cv;
-            } else warnings.push(`config.json: cache.${ck} must be a number >= 0 — ignored`);
-          } else if (ck === "bypassTierDelta") {
-            if (isFiniteNumber(cv) && cv >= 0 && Number.isInteger(cv)) next.cache.bypassTierDelta = cv;
-            else warnings.push("config.json: cache.bypassTierDelta must be an integer >= 0 — ignored");
-          } else {
-            warnings.push(`config.json: unknown key "cache.${ck}" dropped`);
-          }
-        }
+      case "cache":
+        applyObjectKey(next.cache as unknown as Record<string, unknown>, "cache", value, warnings);
         break;
-      }
       case "thinking":
         if (!isRecord(value)) {
           warnings.push("config.json: thinking must be an object — ignored");

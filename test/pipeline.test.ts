@@ -283,15 +283,16 @@ test("guard: confirm mode still reaches the caller as applied (Stage 5 asks)", (
   assert.equal(result.outcome, "applied");
 });
 
-test("guard: an over-cap cache penalty holds the switch", () => {
+test("guard: an over-cap cache penalty holds a non-upgrade switch", () => {
+  // 2026-10-03 校準：升級不受 cache penalty 限制；同層/降級才擋。
   const result = guard(
-    request("high", 2.8),
-    state({ currentTier: "standard", cachePenaltyUsd: 0.2 }),
+    request("standard", 1.6),
+    state({ currentTier: "high", cachePenaltyUsd: 0.2 }),
     config(),
     "auto",
   );
   assert.equal(result.outcome, "held");
-  assert.equal(result.tier, "standard");
+  assert.equal(result.tier, "high", "held keeps the current tier");
   assert.match(String(result.reason), /cache miss/);
 });
 
@@ -315,7 +316,7 @@ test("guard: deadband holds a marginal upward switch", () => {
   // demand 2.5 < floor(high) 2.5 + deadband 0.25
   const result = guard(request("high", 2.5), state({ currentTier: "standard" }), config(), "auto");
   assert.equal(result.outcome, "held");
-  assert.equal(result.tier, "standard");
+  assert.equal(result.tier, "standard", "held keeps the current tier");
   assert.match(String(result.reason), /deadband/);
 });
 

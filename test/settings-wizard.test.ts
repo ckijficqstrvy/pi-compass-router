@@ -951,3 +951,16 @@ test("openRouterModelKeys：stale-if-error（抓失敗回舊快取；沒快取�
     rmSync(dir, { recursive: true, force: true });
   }
 });
+test("顯示：suggest 分數檔可在選單指定（最小完整化）", async () => {
+  const config = freshConfig();
+  const s = scripted({
+    menu: ["⑤ 政策與過濾", "建議分數檔"],
+    answers: { "建議分數檔（/compass suggest 的來源）": CUSTOM_OPTION },
+    inputs: { "分數檔路徑（JSON）": ["/tmp/scores.json"] },
+  });
+
+  await runSettingsWizard(config, s.hooks);
+
+  assert.deepEqual(s.writes[0], ["suggest", { scoresFile: "/tmp/scores.json" }]);
+  assert.equal(config.suggest.scoresFile, "/tmp/scores.json");
+});

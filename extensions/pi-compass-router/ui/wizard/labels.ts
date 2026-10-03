@@ -220,6 +220,11 @@ export const DETAIL_HINT: Record<DisplayDetail, () => string> = {
 };
 
 /** 去重（保序）：候選清單合併用。 */
+/** 過長字串截斷（避免選單列在 80 欄折行破壞對齊）。 */
+export function clip(text: string, max: number): string {
+  return text.length <= max ? text : `${text.slice(0, Math.max(0, max - 1))}…`;
+}
+
 export function dedupe(values: readonly string[]): string[] {
   const seen = new Set<string>();
   const out: string[] = [];
