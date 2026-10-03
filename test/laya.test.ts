@@ -5,6 +5,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { existsSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { execFileSync } from "node:child_process";
 import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -16,11 +17,23 @@ import type { CompassConfig } from "../extensions/pi-compass-router/schema.js";
 const dir = mkdtempSync(join(tmpdir(), "laya-test-"));
 
 /**
- * 跑假 .py 腳本用的 python：優先用本機 laya venv，找不到就用 PATH 的 python3。
- * （不可硬編碼使用者家目錄路徑——那讓測試只能在作者機器上過，CI 終結此依賴。）
+ * 跑假 .py 腳本用的 python（絕對路徑——classifier 用 existsSync 檢查檔案）：
+ * 環境覆寫 → 本機 laya venv → PATH 的 python3（CI 有）。
+ * 不可硬編碼使用者家目錄路徑，那讓測試只能在作者機器上過。
  */
 const LOCAL_VENV_PYTHON = join(homedir(), ".pi", "agent", "pi-compass", "venv", "bin", "python");
-const VENV_PYTHON = process.env.COMPASS_TEST_PYTHON ?? (existsSync(LOCAL_VENV_PYTHON) ? LOCAL_VENV_PYTHON : "python3");
+function findPython(): string {
+  if (process.env.COMPASS_TEST_PYTHON) return process.env.COMPASS_TEST_PYTHON;
+  if (existsSync(LOCAL_VENV_PYTHON)) return LOCAL_VENV_PYTHON;
+  try {
+    const which = execFileSync("which", ["python3"], { encoding: "utf8" }).trim();
+    if (which) return which;
+  } catch {
+    // 沒有 python3 → 下面的 fallback 會讓 classifier 抛「not found」，測試會明說
+  }
+  return "python3";
+}
+const VENV_PYTHON = findPython();
 
 function config(overrides: Partial<CompassConfig["classify"]> = {}): CompassConfig {
   return { ...DEFAULT_CONFIG, classify: { ...DEFAULT_CONFIG.classify, ...overrides } } as CompassConfig;
