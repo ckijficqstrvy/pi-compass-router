@@ -15,15 +15,23 @@ pi-compass 是一個 [pi](https://github.com/earendil-works/pi) 擴充：每輪�
 
 ## 安裝
 
+尚未發佈到 npm，用 git 或本機路徑安裝：
+
 ```sh
-pi install npm:pi-compass-router
+# 從 GitHub
+pi install https://github.com/ckijficqstrvy/pi-compass-router
+
+# 或本機 checkout
+pi install /path/to/pi-compass
 ```
+
+（`npm:pi-compass-router` 在正式發佈後才有。）
 
 ## 命令
 
 | 命令 | 作用 |
 | --- | --- |
-| `/compass` | 顯示目前狀態：模式、花費、層級鏈、分類器狀態、最近一次決定 |
+| `/compass` | 顯示目前狀態：模式、花費、層級鏈、分類器狀態、切換次數與最近一次估算的 prompt-cache miss 成本 |
 | `/compass-set` | 設定選單（TUI pick-list，不耗 token；能枚舉的設定一律用選的，打字只出現在「自訂…」或沒有候選時；寫入 config.json 並附時間戳備份） |
 | `/compass on` \| `/compass off` | 主開關（session-only） |
 | `/compass mode auto\|confirm\|notify` | 切換模式（session-only） |
@@ -35,6 +43,27 @@ pi install npm:pi-compass-router
 
 持久化設定走 `/compass-set` 與 `compass_config` 工具；
 工具另有 `compass_route` 供對話中呼叫。
+
+## 顯示與語言
+
+每次路由決策會寫一則 transcript entry（不進 LLM context），收合時是一行
+脈絡、展開（`app.tools.expand`）是完整明細：
+
+```
+ compass → standard  openrouter/xiaomi/mimo-v2.6-pro
+ plan 90% · demand 1.63 · thinking → high · laya 12ms (miss)
+```
+
+`/compass-set → ⑥ 顯示與呈現` 可調：呈現密度（compact/standard/full）、
+收合列欄位、徽章、配色（rich/mono）、expand 提示、樹狀導軌，以及
+**界面語言**（中文／English）。
+
+```json
+{ "display": { "language": "en", "color": "mono", "detail": "full" } }
+```
+
+命令描述在 session 啟動時定案——切換語言後要重開 session 才會跟進；
+選單、entry 與通知則即時生效。
 
 ## 設定
 
@@ -68,7 +97,7 @@ model catalogue 兜底），**能力分數**永不自動猜，改用榜單人工
 0 6 * * 1 cd /path/to/pi-compass && npm run refresh-facts >> /tmp/pi-compass-refresh-facts.log 2>&1
 ```
 
-超過 14 天未更新時，`/compass-set → ⑥ 看鏈的來源` 會標警示。
+超過 14 天未更新時，`/compass-set → ⑦ 看鏈的來源` 會標警示。
 
 ## License
 

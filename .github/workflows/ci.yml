@@ -1,0 +1,21 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      # accept.sh 涵蓋 typecheck、測試，以及上游識別／clean-room／模組進度檢查。
+      # 驗收 3/4 需要本機的 pi CLI 與 laya 模型，在 CI 無從提供故跳過。
+      - name: Verify (typecheck + tests + static acceptance)
+        run: COMPASS_ACCEPT_SKIP_ENV=1 bash scripts/accept.sh

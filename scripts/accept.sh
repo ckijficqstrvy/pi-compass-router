@@ -31,14 +31,22 @@ check "npm test" "$?" 0
 grep -E '^# (tests|pass|fail)' /tmp/compass-accept-test.log | sed 's/^/      /'
 
 echo "[3] 驗收3 pi -ne -e 載入"
-pi -ne -e extensions/pi-compass-router/index.ts -p "ping" >/dev/null 2>&1
-check "pi -ne -e" "$?" 0
+if [[ "${COMPASS_ACCEPT_SKIP_ENV:-0}" == "1" ]]; then
+  echo "      (skip: COMPASS_ACCEPT_SKIP_ENV=1 — CI 無 pi CLI)"
+else
+  pi -ne -e extensions/pi-compass-router/index.ts -p "ping" >/dev/null 2>&1
+  check "pi -ne -e" "$?" 0
+fi
 
 echo "[4] 驗收4 laya p95 < 80ms"
-npx esbuild test/latency.ts --bundle --packages=external --platform=node --format=esm --outdir=build/lat --log-level=error 2>/dev/null
-node build/lat/latency.js >/tmp/compass-accept-lat.log 2>&1
-check "laya latency" "$?" 0
-grep -E 'p50|PASS|FAIL' /tmp/compass-accept-lat.log | sed 's/^/      /'
+if [[ "${COMPASS_ACCEPT_SKIP_ENV:-0}" == "1" ]]; then
+  echo "      (skip: COMPASS_ACCEPT_SKIP_ENV=1 — CI 無本機 laya 模型)"
+else
+  npx esbuild test/latency.ts --bundle --packages=external --platform=node --format=esm --outdir=build/lat --log-level=error 2>/dev/null
+  node build/lat/latency.js >/tmp/compass-accept-lat.log 2>&1
+  check "laya latency" "$?" 0
+  grep -E 'p50|PASS|FAIL' /tmp/compass-accept-lat.log | sed 's/^/      /'
+fi
 
 echo "[5] 驗收5 上游識別標記（要 1）"
 # 本檔自身除外：它的 grep pattern 字面量必然含禁區字串（自污染），
