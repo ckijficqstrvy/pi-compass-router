@@ -172,7 +172,7 @@ export function createLayaClassifier(
         allowedKinds: entry.input.kinds,
         menuKeys: entry.input.menu,
       });
-      cache.set(cacheKey(entry.input.request, generation), judgment);
+      cache.set(cacheKey(entry.input.request, generation, { conversation: entry.input.conversation, menu: entry.input.menu }), judgment);
       entry.resolve(judgment);
     } catch (error) {
       noteFailure();
@@ -198,7 +198,7 @@ export function createLayaClassifier(
   async function classify(input: ClassifyInput, signal: AbortSignal): Promise<Judgment> {
     // 快取查（Part 6.2）——命中即回，標 cacheHit、latency 記查詢耗時。
     const hitStart = Date.now();
-    const hit = cache.get(cacheKey(input.request, generation), Date.now() - hitStart);
+    const hit = cache.get(cacheKey(input.request, generation, { conversation: input.conversation, menu: input.menu }), Date.now() - hitStart);
     if (hit) return hit;
 
     if (unavailable) {
@@ -264,7 +264,9 @@ export function createLayaClassifier(
       });
 
       try {
-        const payload = JSON.stringify({ id, state: input.request, questions });
+        // Part 4.4：payload 僅 request 與 conversation（有歷史時接在請求前）。
+        const state = input.conversation ? `${input.conversation}\n\n${input.request}` : input.request;
+        const payload = JSON.stringify({ id, state, questions });
         proc.stdin?.write(`${payload}\n`);
       } catch (error) {
         pending.delete(id);

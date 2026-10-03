@@ -95,7 +95,7 @@ export function createCloudClassifier(
   async function classify(input: ClassifyInput, signal: AbortSignal): Promise<Judgment> {
     // 快取查（Part 6.2）。
     const hitStart = Date.now();
-    const hit = cache.get(cacheKey(input.request, generation), Date.now() - hitStart);
+    const hit = cache.get(cacheKey(input.request, generation, { conversation: input.conversation, menu: input.menu }), Date.now() - hitStart);
     if (hit) return hit;
 
     if (provider !== "typesafe") {
@@ -121,7 +121,12 @@ export function createCloudClassifier(
       const response = await fetch(ENDPOINT, {
         method: "POST",
         headers: { Authorization: `Bearer ${apiKey}`, "Content-Type": "application/json" },
-        body: JSON.stringify({ state: input.request, model, questions }),
+        body: JSON.stringify({
+        // Part 4.4：payload 僅 request 與 conversation（有歷史時接在請求前）。
+        state: input.conversation ? `${input.conversation}\n\n${input.request}` : input.request,
+        model,
+        questions,
+      }),
         signal: controller.signal,
       });
       if (!response.ok) {
@@ -140,7 +145,7 @@ export function createCloudClassifier(
       // 計費（Part 4.3）：input tokens → 帳本（output 免費）。
       billUsage(payload);
 
-      cache.set(cacheKey(input.request, generation), judgment);
+      cache.set(cacheKey(input.request, generation, { conversation: input.conversation, menu: input.menu }), judgment);
       return judgment;
     } catch (error) {
       if (error instanceof ClassifyError) throw error;

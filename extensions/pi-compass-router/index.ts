@@ -9,11 +9,13 @@ import { loadConfig, validatePatch, writeConfigPatch } from "./config/load.js";
 import { loadSpend, recordSpend } from "./budget.js";
 import { planTurn, type CostRates } from "./route/plan.js";
 import { compose } from "./route/compose.js";
-import { selectTargets, menuKeys, targetKey, tierOfModel } from "./route/select.js";
+import { selectTargets, targetKey, tierOfModel } from "./route/select.js";
 import { applyRoute, type ApplyHooks } from "./route/apply.js";
 import { runFactsRefresh } from "./ui/facts-refresh.js";
 import { appendDecision } from "./decisions.js";
 import { createLayaClassifier } from "./classify/laya.js";
+import { conversationText } from "./classify/history.js";
+import { classifyInStages } from "./classify/flow.js";
 import { createCloudClassifier } from "./classify/cloud.js";
 import { reloadClassifier } from "./classify/lifecycle.js";
 import type { Classifier, Judgment } from "./classify/types.js";
@@ -118,7 +120,18 @@ async function routeTurn(
   }
   // 過短 → continuation（Part 5 Stage 1），直接 skipped。
   if (prompt.length < config.classify.minPromptChars) {
-    writeEntry(pi, { symbol: "×", tier: null, target: null, reason: "continuation" });
+    // W10（2026-10-03）：skipped 也走 Stage 5——SPEC 說所有模式的 skipped 都
+    // 要套 thinking（修正陳舊層級）；entry 也由同一條管線產生。
+    const skippedHooks = buildHooks(pi, ctx);
+    await applyRoute(
+      {
+        outcome: "skipped",
+        thinking: compose(undefined, config).thinking,
+        mode: config.mode,
+        skipReason: "continuation",
+      },
+      skippedHooks,
+    );
     if (config.decisionLog) appendDecision({ type: "route", model: nowModel, symbol: "×", outcome: "skipped", tier: null });
     state.lastExpectedModel = nowModel ?? state.lastExpectedModel;
     return;
@@ -126,18 +139,23 @@ async function routeTurn(
 
   const signal = ctx.signal ?? new AbortController().signal;
 
-  // Stage 1 — classify（menu 組 key 與 select 一致）。
+  // Stage 1 — classify（W5：menu 模式走兩階段；W6：帶 conversation）。
   let judgment: Judgment | undefined;
   if (state.classifier) {
-    try {
-      const menu = menuKeys(compose(undefined, config).tier, undefined, config);
-      judgment = await state.classifier.classify(
-        { request: prompt, kinds: kindsOf(config), menu },
-        signal,
-      );
-    } catch {
-      judgment = undefined; // 超時/失敗 → fail-open，Stage 2 用 tier 預設
-    }
+    judgment = await classifyInStages(
+      state.classifier,
+      {
+        request: prompt,
+        kinds: kindsOf(config),
+        // W6：historyTurns > 0 時才組（Part 4.4 預設 0＝不送）。
+        conversation: conversationText(
+          (ctx.sessionManager?.getBranch?.() ?? []) as never,
+          config.classify.historyTurns,
+        ),
+      },
+      config,
+      signal,
+    );
   }
 
   // Stage 2–4 — 純編排（route/plan.ts）：compose → select → 可用性 → cache → guard。
@@ -164,13 +182,18 @@ async function routeTurn(
   );
 
   if (plan.unavailable || !plan.target || !plan.guard) {
-    writeEntry(pi, {
-      symbol: "×",
-      tier: plan.composed.tier,
-      target: null,
-      reason: "no route available",
-      notes: plan.notes,
-    });
+    const skippedHooks = buildHooks(pi, ctx);
+    await applyRoute(
+      {
+        outcome: "skipped",
+        thinking: plan.composed.thinking,
+        mode: config.mode,
+        tier: plan.composed.tier,
+        skipReason: "no route available",
+        notes: plan.notes,
+      },
+      skippedHooks,
+    );
     if (config.decisionLog) {
       appendDecision({
         type: "route",

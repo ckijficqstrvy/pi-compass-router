@@ -21,10 +21,12 @@ export interface ApplyHooks {
 /** Stage 5 輸入：由 guard 與 mode 組成的決策。 */
 export interface ApplyDecision {
   outcome: GuardOutcome;
-  target: Target;
+  /** skipped（continuation/no-route）沒有目標模型。 */
+  target?: Target;
   thinking: ThinkingLevel;
   mode: Mode;
-  tier: Tier;
+  /** skipped 可無層級（entry 顯示 null）。 */
+  tier?: Tier;
   /** guard 的理由（budget/cache/cooldown），寫進 entry。 */
   reason?: string;
   /** 分類資訊（entry 的 `classify` 欄）。 */
@@ -88,8 +90,8 @@ export async function applyRoute(
 
   const entry: RouteEntry = {
     symbol,
-    tier: decision.tier,
-    target,
+    tier: decision.tier ?? null,
+    target: target ?? null,
     reason: decision.reason ?? decision.skipReason,
     notes: decision.notes,
     classify: decision.classify,
@@ -130,15 +132,20 @@ export async function applyRoute(
   let error: string | undefined;
 
   if (wantsModel) {
-    try {
-      // prefer 注入的條目 provider 為空字串 → 只傳裸 model（targetKey，同 menu id 編碼）。
-      await hooks.setModel(target);
-      result.applied = true;
-      if (symbol === "→") entry.symbol = "→";
-    } catch (e) {
+    if (target === undefined) {
+      // 不可能：applied 必経 select。保險起見 fail-open（W10 後 target 可為空）。
       result.failed = true;
-      error = `apply failed: ${sanitizeRemote(e instanceof Error ? e.message : e)}`;
-      result.needsConfirm = false;
+      error = "apply failed: no target for an applied outcome";
+    } else {
+      try {
+        await hooks.setModel(target);
+        result.applied = true;
+        if (symbol === "→") entry.symbol = "→";
+      } catch (e) {
+        result.failed = true;
+        error = `apply failed: ${sanitizeRemote(e instanceof Error ? e.message : e)}`;
+        result.needsConfirm = false;
+      }
     }
   }
 

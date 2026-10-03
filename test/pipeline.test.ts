@@ -490,3 +490,18 @@ test("apply: a prefer entry with an empty provider passes the bare model id", as
   await applyRoute(decision({ target: { provider: "", model: "~z-ai/glm-latest", explicit: true } }), h);
   assert.equal(calls.model, "~z-ai/glm-latest", "empty provider → bare id (targetKey)");
 });
+
+test("apply: skipped without a target still applies thinking and writes the entry (W10)", async () => {
+  const { h, calls } = hooks();
+  const result = await applyRoute(
+    { outcome: "skipped", thinking: "low", mode: "auto", skipReason: "continuation" },
+    h,
+  );
+  assert.equal(result.applied, false);
+  assert.equal(calls.thinking, "low", "skipped applies thinking (stale-level fix)");
+  assert.equal(calls.entries.length, 1);
+  assert.equal(calls.entries[0].symbol, "×");
+  assert.equal(calls.entries[0].target, null);
+  assert.equal(calls.entries[0].tier, null);
+  assert.equal(calls.entries[0].reason, "continuation");
+});

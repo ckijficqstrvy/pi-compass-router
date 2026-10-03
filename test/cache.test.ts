@@ -147,3 +147,14 @@ test("clear empties the cache", () => {
   cache.clear();
   assert.equal(cache.size, 0);
 });
+// ---------------------------------------------------------------------------
+// W6：cache key 必須反映 conversation 與 menu
+// ---------------------------------------------------------------------------
+
+test("cacheKey changes with conversation and with menu", async () => {
+  const { cacheKey } = await import("../extensions/pi-compass-router/classify/cache.js");
+  const base = cacheKey("same request", "gen");
+  assert.notEqual(base, cacheKey("same request", "gen", { conversation: "user: earlier" }), "conversation changes the key");
+  assert.notEqual(base, cacheKey("same request", "gen", { menu: ["p/a", "p/b"] }), "menu changes the key");
+  assert.equal(base, cacheKey("same request", "gen", { conversation: "", menu: [] }), "empty extras match the base");
+});

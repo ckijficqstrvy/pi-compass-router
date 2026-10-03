@@ -41,9 +41,26 @@ export function configGeneration(taskKinds: unknown, modelPickMode: string): str
   return createHash("sha256").update(material).digest("hex").slice(0, 16);
 }
 
-/** 完整快取鍵：`normalize(request)` 與設定世代的組合雜湊。 */
-export function cacheKey(request: string, generation: string): string {
-  return createHash("sha256").update(`${generation}\u0000${normalizeRequest(request)}`).digest("hex");
+/**
+ * 完整快取鍵：設定世代 + request + **conversation 與 menu**（W6，2026-10-03）。
+ *
+ * conversation 與 menu 會改變分類答案（前者是上下文、後者決定第六題選項），
+ * 不進鍵就會把「同一句、不同上下文」或「不同候選清單」誤判成命中。
+ * `v=2` 讓舊格式的鍵自然失效。
+ */
+export function cacheKey(
+  request: string,
+  generation: string,
+  extra: { conversation?: string; menu?: readonly string[] } = {},
+): string {
+  const material = [
+    generation,
+    normalizeRequest(request),
+    extra.conversation ?? "",
+    (extra.menu ?? []).join("\n"),
+    "v=2",
+  ].join("\u0000");
+  return createHash("sha256").update(material).digest("hex");
 }
 
 export interface CacheStats {
