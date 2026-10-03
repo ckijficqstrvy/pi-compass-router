@@ -58,6 +58,20 @@ const deps = {
   costOf: (_t: Target): CostRates | null => null,
 };
 
+test("stickiness holds when the current model already is the target (provider/model key)", () => {
+  // 回歸（2026-10-03 實跑發現）：guard 只比 `target.model`（bare id），而
+  // 呼叫端傳的是 `provider/model`，導致 provider 非空時永遠不命中。
+  const config = configWith();
+  const plan = planTurn(
+    judgmentFor(1.9),
+    config,
+    snapshotWith({ currentModel: "openrouter/standard-model", currentTier: null }),
+    deps,
+  );
+  assert.equal(plan.guard?.outcome, "held");
+  assert.match(String(plan.guard?.reason), /stickiness/);
+});
+
 test("first switch (currentTier null) is not blocked by the deadband", () => {
   // demand 1.6 ≥ standard floor 1.5，但 < 1.5+0.25；currentTier null → 不套 deadband。
   const plan = planTurn(judgmentFor(1.6), configWith(), snapshotWith({ currentTier: null }), deps);

@@ -227,7 +227,8 @@ function request(tier: GuardRequest["tier"], demand: number, model = "openrouter
 }
 
 test("guard: stickiness holds when the current model is already the target", () => {
-  const result = guard(request("high", 2.8, "openrouter/m1"), state({ currentModel: "openrouter/m1", currentTier: "high" }), config(), "auto");
+  // fixture 用生產形狀：provider 分開、model 是裸 id（不是整條 key）。
+  const result = guard(request("high", 2.8, "m1"), state({ currentModel: "openrouter/m1", currentTier: "high" }), config(), "auto");
   assert.equal(result.outcome, "held");
   assert.equal(result.tier, "high");
   assert.match(String(result.reason), /stickiness/);

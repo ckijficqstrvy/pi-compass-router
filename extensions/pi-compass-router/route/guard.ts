@@ -70,7 +70,10 @@ export function guard(
   const { target, tier: requestedTier, demand } = request;
 
   // 1. stickiness — 當前已是目標 → held（層級沿用當前，Part 5）。
-  if (state.currentModel !== null && state.currentModel === target.model) {
+  // 比較要用完整 `provider/model`（與呼叫端 currentModel 同編碼）——
+  // 只比 target.model 會在 provider 非空時**永遠不命中**（2026-10-03 實跑發現）。
+  const targetId = target.provider ? `${target.provider}/${target.model}` : target.model;
+  if (state.currentModel !== null && state.currentModel === targetId) {
     return {
       outcome: "held",
       tier: state.currentTier ?? requestedTier,

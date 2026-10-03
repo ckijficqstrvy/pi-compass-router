@@ -118,7 +118,7 @@ export const EN: Record<string, string> = {
   "④ 分類器 ............. ${} · TTL ${}s · timeout ${}ms": "④ Classifier ........ ${} · TTL ${}s · timeout ${}ms",
   "⑤ 政策與過濾 .......... deny ${} · ceilings ${} · prefer ${}": "⑤ Policy ............ deny ${} · ceilings ${} · prefer ${}",
   "⑥ 顯示與呈現 ........... ${} · 欄位 ${} · ${}${}": "⑥ Display ........... ${} · fields ${} · ${}${}",
-  "⑦ 重設・診斷 .......... 重設某項 · 測試分類器 · 看鏈的來源": "⑦ Reset & diagnostics .. reset · test classifier · chain sources",
+  "⑦ 重設・診斷 .......... 重設某項 · 測試分類器 · 看鏈的來源": "⑦ Reset & diagnostics ........... reset · test classifier · chain sources",
   " ⚠快照 ${}天": " ⚠ snapshot ${}d old",
   " · 徽章": " · badge",
   "依 profile ${}": "per profile ${}",

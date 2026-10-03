@@ -41,8 +41,18 @@ interface SessionState {
   lastCacheMissUsd?: number;
   /** 上一輪結束時預期在位的模型；下一輪不同 = 使用者（或別的擴充）換過模型。 */
   lastExpectedModel?: string;
-  /** 上一輪決策脈絡（回饋紀錄用）。 */
-  lastDecision?: { kind?: string; tier: string | null };
+  /** 最近一次路由決定的完整細節（`/compass why` 顯示 + 回饋脈絡）。 */
+  lastDecision?: {
+    kind?: string;
+    kindConfidence?: number;
+    demand?: number;
+    tier: string | null;
+    model?: string | null;
+    thinking?: string;
+    symbol?: string;
+    outcome?: string;
+    cacheMissUsd?: number;
+  };
   /** 本次 session 的切換次數（`/compass status` 的 `switches: N`）。 */
   switches: number;
 }
@@ -229,7 +239,17 @@ async function routeTurn(
   // #9 決策日誌（非內容欄位）+ #8 期望模型更新。
   const expected = outcome.applied ? targetKey(available) : (nowModel ?? targetKey(available));
   state.lastExpectedModel = expected;
-  state.lastDecision = { kind: judgment?.kind, tier: result.tier };
+  state.lastDecision = {
+    kind: judgment?.kind,
+    kindConfidence: judgment?.kindConfidence,
+    demand: plan.composed.demand,
+    tier: result.tier,
+    model: targetKey(available),
+    thinking: plan.composed.thinking,
+    symbol: outcome.symbol,
+    outcome: result.outcome,
+    cacheMissUsd: plan.cacheMissUsd,
+  };
   if (config.decisionLog) {
     appendDecision({
       type: "route",
@@ -347,6 +367,7 @@ function registerCommands(pi: ExtensionAPI, state: SessionState): void {
       const [sub, ...rest] = args.trim().split(/\s+/);
       switch (sub) {
         case undefined:
+        case "":
           return showStatus(ctx, state);
         case "on":
           state.config.enabled = true;
@@ -483,7 +504,19 @@ async function showStatus(ctx: ExtensionContext, state: SessionState, why = fals
     `model ${current} · switches ${state.switches}${cacheMiss} · profile ${state.config.profile}`,
     `routes quick[${state.config.routes.quick.length}] standard[${state.config.routes.standard.length}] high[${state.config.routes.high.length}]`,
   ];
-  if (why) lines.push(`classify ${state.config.classify.provider} · timeout ${state.config.classify.timeoutMs}ms`);
+  if (why) {
+    lines.push(`classify ${state.config.classify.provider} · timeout ${state.config.classify.timeoutMs}ms`);
+    const d = state.lastDecision;
+    if (d) {
+      const conf = d.kindConfidence === undefined ? "" : ` ${Math.round(d.kindConfidence * 100)}%`;
+      const miss = d.cacheMissUsd === undefined ? "" : ` · cache miss ≈ $${d.cacheMissUsd.toFixed(3)}`;
+      lines.push(
+        `last: ${d.symbol ?? "?"} ${d.tier ?? "-"} ${d.model ?? "-"} · kind ${d.kind ?? "?"}${conf} · demand ${d.demand?.toFixed(2) ?? "-"} · thinking ${d.thinking ?? "-"}${miss} · ${d.outcome ?? "-"}`,
+      );
+    } else {
+      lines.push("last: (none this session)");
+    }
+  }
   ctx.ui.notify(lines.join("\n"), "info");
 }
 

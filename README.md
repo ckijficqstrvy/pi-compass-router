@@ -36,7 +36,7 @@ pi install /path/to/pi-compass
 | `/compass on` \| `/compass off` | 主開關（session-only） |
 | `/compass mode auto\|confirm\|notify` | 切換模式（session-only） |
 | `/compass budget daily <n>` | session-only 日上限（`monthly` 為月上限） |
-| `/compass why` | 重跑分類，顯示完整判斷與決策軌跡 |
+| `/compass why` | 顯示最近一次路由決定的完整細節（分類結果/信心、demand、tier、模型、thinking、cache 估算） |
 | `/compass revert` | 回到上一次自動切換之前的模型（並記一筆 revert 回饋） |
 | `/compass suggest` | 從本地分數檔提議路由（僅提議，不切換） |
 | `/compass refresh-facts` | 同步 model facts 的價格（能力分數仍人工核對）；事實檔過舊時 session 啟動會提醒 |
