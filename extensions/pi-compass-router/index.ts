@@ -11,6 +11,7 @@ import { planTurn, type CostRates } from "./route/plan.js";
 import { compose } from "./route/compose.js";
 import { selectTargets, menuKeys, targetKey, tierOfModel } from "./route/select.js";
 import { applyRoute, type ApplyHooks } from "./route/apply.js";
+import { runFactsRefresh } from "./ui/facts-refresh.js";
 import { createLayaClassifier } from "./classify/laya.js";
 import { createCloudClassifier } from "./classify/cloud.js";
 import { reloadClassifier } from "./classify/lifecycle.js";
@@ -19,9 +20,13 @@ import { type RouteEntry } from "./ui/entries.js";
 import { renderEntryCard } from "./ui/entry-card.js";
 import { setLang, t } from "./ui/strings.js";
 import { suggest } from "./suggest.js";
-import { runSettingsWizard, type CandidateKind, type WizardHooks } from "./ui/wizard.js";
+import { runSettingsWizard, factsAgeDays, type CandidateKind, type WizardHooks } from "./ui/wizard.js";
+import { MODEL_FACTS } from "./policy/facts.js";
 import { cloudClassifierKeys, localCheckpoints, openRouterModelKeys } from "./ui/sources.js";
 import type { CompassConfig, Mode, Target, ThinkingLevel, Tier } from "./schema.js";
+
+/** 事實檔過舊的提醒門檻（天）；與 wizard 的 STALE_FACTS_DAYS 同值。 */
+const STALE_FACTS_DAYS_HINT = 14;
 
 /** session 生命週期持有的資源（`session_start` 開、`session_shutdown` 收）。 */
 interface SessionState {
@@ -248,8 +253,18 @@ export default function compass(pi: ExtensionAPI): void {
 
   // session lifecycle：載入設定 + 預熱 laya（由 reloadConfig 重建時預熱，
   // 輸入沒變則沿用既有的暖子行程）；關閉時拆除。
-  pi.on("session_start", () => {
+  pi.on("session_start", (_event, ctx) => {
     reloadConfig(state);
+    // 事實檔過舊（>14 天）：主動提醒一次可一鍵更新（/compass refresh-facts）。
+    if (ctx?.hasUI) {
+      const age = factsAgeDays(MODEL_FACTS.generatedAt);
+      if (age !== null && age > STALE_FACTS_DAYS_HINT) {
+        ctx.ui.notify(
+          `model facts are ${age} days old — run /compass refresh-facts to sync prices`,
+          "warning",
+        );
+      }
+    }
   });
   pi.on("session_shutdown", () => {
     state.classifier?.dispose?.();
@@ -275,7 +290,7 @@ export default function compass(pi: ExtensionAPI): void {
 /** `/compass` 與其子命令（Part 10.1）。 */
 function registerCommands(pi: ExtensionAPI, state: SessionState): void {
   pi.registerCommand("compass", {
-    description: t("compass 狀態 / on|off / mode / budget / why / revert / suggest"),
+    description: t("compass 狀態 / on|off / mode / budget / why / revert / suggest / refresh-facts"),
     handler: async (args, ctx) => {
       const [sub, ...rest] = args.trim().split(/\s+/);
       switch (sub) {
@@ -308,6 +323,10 @@ function registerCommands(pi: ExtensionAPI, state: SessionState): void {
           return ctx.ui.notify(state.previousModel ? `revert → ${state.previousModel}` : "nothing to revert", "info");
         case "suggest":
           return showSuggest(ctx, state);
+        case "refresh-facts": {
+          const result = runFactsRefresh();
+          return ctx.ui.notify(result.message, result.ok ? "info" : "error");
+        }
         default:
           return ctx.ui.notify(`unknown subcommand: ${sub}`, "warning");
       }

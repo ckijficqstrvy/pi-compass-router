@@ -39,6 +39,7 @@ pi install /path/to/pi-compass
 | `/compass why` | 重跑分類，顯示完整判斷與決策軌跡 |
 | `/compass revert` | 回到上一次自動切換之前的模型 |
 | `/compass suggest` | 從本地分數檔提議路由（僅提議，不切換） |
+| `/compass refresh-facts` | 同步 model facts 的價格（能力分數仍人工核對）；事實檔過舊時 session 啟動會提醒 |
 | `/compass-route <text>` | 對任意文字分類並顯示建議，不切換 |
 
 持久化設定走 `/compass-set` 與 `compass_config` 工具；

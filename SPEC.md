@@ -878,6 +878,7 @@ pressure = max(today÷dailyUsd, month÷monthlyUsd)
 | `/compass why` | 重跑分類並顯示完整判斷 + 決策軌跡 |
 | `/compass revert` | 回到上一次 auto-switch 之前的模型 |
 | `/compass suggest` | **移植 #12**：從本地分數檔提議路由（不切換） |
+| `/compass refresh-facts` | **2026-10-03 新增**：跑 `scripts/refresh-facts.mjs` 同步價格（能力分數仍人工）；事實檔過舊（>14 天）時 session 啟動會提醒一次 |
 | `/compass-route <text>` | 分類任意文字並顯示建議，不切換 |
 
 `on/off`、`mode`、`budget` 為 session-only；
@@ -1212,9 +1213,13 @@ pi-compass/
 │   ├── budget.ts             # 記帳與壓力
 │   ├── suggest.ts            # /compass suggest（本地分數檔）
 │   └── ui/
-│       ├── wizard.ts         # /compass-set（沿用你的原創）
-│       └── entries.ts        # entry 檢視模型 + 純文字渲染
-│       └── entry-card.ts     # entry 主題化卡片（Tone → theme token）
+│       ├── wizard.ts         # /compass-set 對外窗口（2026-10-03 拆檔）
+│       ├── wizard/           # labels / items / edit / run / types
+│       ├── entries.ts        # entry 檢視模型 + 純文字渲染
+│       ├── entry-card.ts     # entry 主題化卡片（Tone → theme token）
+│       ├── strings.ts        # zh/en 字典（t/tl/tr、rawOf）
+│       ├── sources.ts        # 候選來源（registry / HF 快取 / OpenRouter）
+│       └── facts-refresh.ts  # /compass refresh-facts 的 spawn 與摘要
 ├── test/
 ├── scripts/refresh-facts.mjs # 沿用你的原創
 ├── NOTICE
