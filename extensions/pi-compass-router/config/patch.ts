@@ -56,6 +56,7 @@ export const PATCH_SCHEMA: Record<string, TSchema> = {
   allowUnratedPicks: Type.Boolean(),
   freeOnly: Type.Boolean(),
   stickiness: Type.Boolean(),
+  decisionLog: Type.Boolean(),
   mode: literalUnion(MODES),
   modelPick: literalUnion(MODEL_PICKS),
   profile: literalUnion(PROFILES),

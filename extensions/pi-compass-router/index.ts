@@ -12,6 +12,7 @@ import { compose } from "./route/compose.js";
 import { selectTargets, menuKeys, targetKey, tierOfModel } from "./route/select.js";
 import { applyRoute, type ApplyHooks } from "./route/apply.js";
 import { runFactsRefresh } from "./ui/facts-refresh.js";
+import { appendDecision } from "./decisions.js";
 import { createLayaClassifier } from "./classify/laya.js";
 import { createCloudClassifier } from "./classify/cloud.js";
 import { reloadClassifier } from "./classify/lifecycle.js";
@@ -38,6 +39,10 @@ interface SessionState {
   lastSwitchAtMs?: number;
   /** 最近一次估的 prompt-cache miss 成本（`/compass` 顯示，Part 7）。 */
   lastCacheMissUsd?: number;
+  /** 上一輪結束時預期在位的模型；下一輪不同 = 使用者（或別的擴充）換過模型。 */
+  lastExpectedModel?: string;
+  /** 上一輪決策脈絡（回饋紀錄用）。 */
+  lastDecision?: { kind?: string; tier: string | null };
   /** 本次 session 的切換次數（`/compass status` 的 `switches: N`）。 */
   switches: number;
 }
@@ -85,9 +90,24 @@ async function routeTurn(
 ): Promise<void> {
   const config = state.config;
   if (!config.enabled) return;
+  const nowModel = currentTarget(ctx, config)?.model ?? null;
+  // #8 手動換模型：上一輪我們預期在位的模型與現在不同 → 記一筆 feedback。
+  // 限制：無法區分「使用者自己換」與「其他擴充換」，已知取捨（2026-10-03）。
+  if (config.decisionLog && state.lastExpectedModel && nowModel && nowModel !== state.lastExpectedModel) {
+    appendDecision({
+      type: "feedback",
+      feedback: "manual-override",
+      from: state.lastExpectedModel,
+      to: nowModel,
+      tier: state.lastDecision?.tier ?? null,
+      kind: state.lastDecision?.kind,
+    });
+  }
   // 過短 → continuation（Part 5 Stage 1），直接 skipped。
   if (prompt.length < config.classify.minPromptChars) {
     writeEntry(pi, { symbol: "×", tier: null, target: null, reason: "continuation" });
+    if (config.decisionLog) appendDecision({ type: "route", model: nowModel, symbol: "×", outcome: "skipped", tier: null });
+    state.lastExpectedModel = nowModel ?? state.lastExpectedModel;
     return;
   }
 
@@ -138,6 +158,19 @@ async function routeTurn(
       reason: "no route available",
       notes: plan.notes,
     });
+    if (config.decisionLog) {
+      appendDecision({
+        type: "route",
+        kind: judgment?.kind,
+        kindConfidence: judgment?.kindConfidence,
+        demand: plan.composed.demand,
+        tier: plan.composed.tier,
+        model: null,
+        symbol: "×",
+        outcome: "skipped",
+      });
+    }
+    state.lastExpectedModel = nowModel ?? state.lastExpectedModel;
     return;
   }
 
@@ -191,6 +224,28 @@ async function routeTurn(
   }
   if (outcome.applied && state.config.mode === "auto") {
     state.previousModel = current?.model;
+  }
+
+  // #9 決策日誌（非內容欄位）+ #8 期望模型更新。
+  const expected = outcome.applied ? targetKey(available) : (nowModel ?? targetKey(available));
+  state.lastExpectedModel = expected;
+  state.lastDecision = { kind: judgment?.kind, tier: result.tier };
+  if (config.decisionLog) {
+    appendDecision({
+      type: "route",
+      kind: judgment?.kind,
+      kindConfidence: judgment?.kindConfidence,
+      demand: plan.composed.demand,
+      tier: result.tier,
+      model: targetKey(available),
+      thinking: plan.composed.thinking,
+      symbol: outcome.symbol,
+      outcome: result.outcome,
+      cacheMissUsd: plan.cacheMissUsd,
+      classify: judgment
+        ? { source: judgment.source, latencyMs: judgment.latencyMs, hit: judgment.cacheHit ?? false }
+        : { source: "fallback", latencyMs: 0, hit: false },
+    });
   }
 }
 
@@ -316,8 +371,29 @@ function registerCommands(pi: ExtensionAPI, state: SessionState): void {
         }
         case "why":
           return showStatus(ctx, state, true);
-        case "revert":
-          return ctx.ui.notify(state.previousModel ? `revert → ${state.previousModel}` : "nothing to revert", "info");
+        case "revert": {
+          const previous = state.previousModel;
+          if (!previous) return ctx.ui.notify("nothing to revert", "info");
+          const slash = previous.indexOf("/");
+          const provider = slash > 0 ? previous.slice(0, slash) : "";
+          const modelId = slash > 0 ? previous.slice(slash + 1) : previous;
+          const model = ctx.modelRegistry.find(provider, modelId);
+          if (!model) return ctx.ui.notify(`revert: model not found: ${previous}`, "warning");
+          const ok = await pi.setModel(model);
+          if (!ok) return ctx.ui.notify(`revert: auth not configured for ${previous}`, "warning");
+          if (state.config.decisionLog) {
+            appendDecision({
+              type: "feedback",
+              feedback: "revert",
+              from: currentTarget(ctx, state.config)?.model ?? null,
+              to: previous,
+              tier: state.lastDecision?.tier ?? null,
+              kind: state.lastDecision?.kind,
+            });
+          }
+          state.lastExpectedModel = previous;
+          return ctx.ui.notify(`revert → ${previous}`, "info");
+        }
         case "suggest":
           return showSuggest(ctx, state);
         case "refresh-facts": {

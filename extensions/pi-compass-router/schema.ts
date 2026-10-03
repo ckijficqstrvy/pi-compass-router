@@ -206,6 +206,8 @@ export interface CompassConfig {
   cache: SwitchCacheConfig;
   thinking: ThinkingConfig;
   display: DisplayConfig;
+  /** 決策日誌（非內容欄位；預設開，SPEC Part 8/11）。 */
+  decisionLog: boolean;
 }
 
 /**
@@ -360,6 +362,8 @@ export const DEFAULT_CONFIG: CompassConfig = {
   thinking: {},
   // 呈現預設 = 「標準」風格：徽章 + 脈絡一列、全彩、expand 提示、樹狀導軌。
   display: { ...DISPLAY_DEFAULTS, fields: [...DISPLAY_DEFAULTS.fields] },
+  // 決策日誌：預設開啟，只存非內容欄位（可用 config 設 false 關閉）。
+  decisionLog: true,
 };
 
 /** 每層預設 thinking（Part 5 Stage 2 `TIER_THINKING`）。 */

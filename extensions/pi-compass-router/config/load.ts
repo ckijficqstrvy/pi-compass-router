@@ -158,6 +158,7 @@ function applyFilePatch(
       case "allowUnratedPicks":
       case "freeOnly":
       case "stickiness":
+      case "decisionLog":
         if (typeof value === "boolean") Object.assign(next, { [key]: value });
         else warnings.push(`config.json: ${key} must be a boolean — ignored`);
         break;

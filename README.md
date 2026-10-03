@@ -37,7 +37,7 @@ pi install /path/to/pi-compass
 | `/compass mode auto\|confirm\|notify` | 切換模式（session-only） |
 | `/compass budget daily <n>` | session-only 日上限（`monthly` 為月上限） |
 | `/compass why` | 重跑分類，顯示完整判斷與決策軌跡 |
-| `/compass revert` | 回到上一次自動切換之前的模型 |
+| `/compass revert` | 回到上一次自動切換之前的模型（並記一筆 revert 回饋） |
 | `/compass suggest` | 從本地分數檔提議路由（僅提議，不切換） |
 | `/compass refresh-facts` | 同步 model facts 的價格（能力分數仍人工核對）；事實檔過舊時 session 啟動會提醒 |
 | `/compass-route <text>` | 對任意文字分類並顯示建議，不切換 |
@@ -70,6 +70,7 @@ pi install /path/to/pi-compass
 
 - 設定檔：`~/.pi/agent/pi-compass/config.json`
 - 狀態檔：`~/.pi/agent/pi-compass/state.json`
+- 決策日誌：`~/.pi/agent/pi-compass/decisions.jsonl`（JSONL；**只存非內容欄位**：kind、demand、tier、模型、thinking、結果與使用者回饋，不存 prompt）。預設開啟，`"decisionLog": false` 可關。
 - 環境變數：`COMPASS_*` 前綴，解析順序為「內建預設 → config.json → 環境變數」，後者勝。
 
 ## Requirements

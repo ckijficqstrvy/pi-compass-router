@@ -209,6 +209,7 @@ pi-compass 是一個 pi 擴充，在每一輪對話**開始之前**判斷該用�
 | `allowUnratedPicks` | boolean | `false` | 允許未評分模型中選 |
 | `freeOnly` | boolean | `false` | 特殊情境：只用 $0 模型 |
 | `stickiness` | boolean | `true` | 當前已是目標 → 不切換 |
+| `decisionLog` | boolean | `true` | 決策日誌（非內容欄位）寫 `decisions.jsonl`；false 關閉 |
 | `cache.aware` | boolean | `true` | 切換前估算 cache miss 成本 |
 | `cache.deadband` | number ≥0 | `0.25` | 需超出當前層 ±deadband 才換層 |
 | `cache.maxPenaltyUsd` | number ≥0 | `0.05` | 估算成本超此 → 擋下切換 |
@@ -496,6 +497,10 @@ fail-open（不崩，但也不路由）。
 - **不送** cwd、環境變數、花費數字。
 - 無 `endpoint`／`stateFile` 設定鍵。
 - 輸出永不回顯金鑰值。
+- **決策日誌**（`decisions.jsonl`，2026-10-03 新增）只寫**非內容欄位**：
+  kind/信心、demand、tier、模型、thinking、結果、cache 估算，以及使用者的
+  回饋（revert / manual-override）。**不寫 prompt 或對話原文**——
+  預設開啟，`decisionLog: false` 可關。
 
 ---
 
@@ -876,7 +881,7 @@ pressure = max(today÷dailyUsd, month÷monthlyUsd)
 | `/compass budget daily 10` | session-only 日上限 |
 | `/compass budget monthly 150` | session-only 月上限 |
 | `/compass why` | 重跑分類並顯示完整判斷 + 決策軌跡 |
-| `/compass revert` | 回到上一次 auto-switch 之前的模型 |
+| `/compass revert` | 回到上一次 auto-switch 之前的模型（2026-10-03 修正：從前只通知沒真的換回）；並記一筆 revert 回饋 |
 | `/compass suggest` | **移植 #12**：從本地分數檔提議路由（不切換） |
 | `/compass refresh-facts` | **2026-10-03 新增**：跑 `scripts/refresh-facts.mjs` 同步價格（能力分數仍人工）；事實檔過舊（>14 天）時 session 啟動會提醒一次 |
 | `/compass-route <text>` | 分類任意文字並顯示建議，不切換 |
@@ -1219,6 +1224,7 @@ pi-compass/
 │   │   ├── model-facts.json  # 沿用你的原創
 │   │   └── filter.ts         # deny / allowProviders / prefer
 │   ├── budget.ts             # 記帳與壓力
+│   ├── decisions.ts          # 決策日誌（非內容欄位 JSONL，2026-10-03）
 │   ├── suggest.ts            # /compass suggest（本地分數檔）
 │   └── ui/
 │       ├── wizard.ts         # /compass-set 對外窗口（2026-10-03 拆檔）
