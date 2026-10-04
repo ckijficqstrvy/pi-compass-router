@@ -427,6 +427,28 @@ test("sliceBands puts each priced fact in the first band that covers it", () => 
   assert.deepStrictEqual(bands[4].map((m) => m.model), ["rich"], "the open-ended band catches everything else");
 });
 
+test("a non-last null ceiling does not swallow the whole ladder (F2)", () => {
+  const ranked = [
+    { provider: "p", model: "cheap", capability: 10, price: { input: 0.5, output: 0.1 } },
+    { provider: "p", model: "mid", capability: 20, price: { input: 3, output: 1 } },
+    { provider: "p", model: "rich", capability: 30, price: { input: 100, output: 100 } },
+  ];
+  const bands = sliceBands(ranked, [null, 5, 15, 44, null]);
+  assert.deepStrictEqual(bands[0].map((m) => m.model), [], "null at quick must not claim everything");
+  assert.deepStrictEqual(bands[1].map((m) => m.model), ["cheap", "mid"]);
+  assert.deepStrictEqual(bands[4].map((m) => m.model), ["rich"]);
+});
+
+test("a null ceiling before a finite one is warned about (F1/F2)", () => {
+  const temp = withTempConfig({ ceilings: { quick: null } });
+  try {
+    const { warnings } = loadConfig(NO_ENV, { filePath: temp.path });
+    assert.ok(warnings.some((w) => w.includes("ceilings.standard is finite after an unbounded")), warnings.join(" | "));
+  } finally {
+    temp.cleanup();
+  }
+});
+
 test("a fact without a price is never banded (capability alone must not place it)", () => {
   const ranked = [{ provider: "p", model: "unpriced", capability: 99 }];
   const bands = sliceBands(ranked, [1, 5, 15, 44, null]);

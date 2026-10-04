@@ -112,7 +112,14 @@ export function sliceBands(
     const price = blendedOf(fact.price);
     for (let t = 0; t < TIERS.length; t += 1) {
       const upper = ceilings[t];
-      if (upper === null || upper === undefined || price <= upper) {
+      // A null (unbounded) ceiling may only own the remainder at the highest
+      // tier. Letting a lower null tier swallow everything would collapse the
+      // whole ladder (2026-10-04: `ceilings.quick = null` did exactly that).
+      if (upper === null || upper === undefined) {
+        if (t === TIERS.length - 1) bands[t].push(fact);
+        continue;
+      }
+      if (price <= upper) {
         bands[t].push(fact);
         break;
       }

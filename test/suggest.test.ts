@@ -64,6 +64,26 @@ test("scoresFromHistory: reverted-from loses, moved-to gains, chosen is a weak p
   assert.match(scores["p/good"].note, /history \+2\/-0/);
 });
 
+test("scoresFromHistory ignores held records and drops records outside the window (F9)", () => {
+  const now = Date.parse("2026-10-04T00:00:00Z");
+  const records = [
+    { type: "route", model: "p/held-only", symbol: "=", outcome: "held" },
+    { type: "route", model: "p/applied", symbol: "→", outcome: "applied" },
+    { type: "route", model: "p/old", symbol: "→", outcome: "applied", ts: "2020-01-01T00:00:00Z" },
+  ] as never[];
+  const scores = scoresFromHistory(records, now);
+  assert.equal(scores["p/held-only"], undefined, "held is ambiguous, not a chosen signal");
+  assert.ok(scores["p/applied"].score > 0.5);
+  assert.equal(scores["p/old"], undefined, "records older than the window are ignored");
+});
+
+test("deriveTier accepts a bare ~-prefixed model id (F5)", async () => {
+  const path = writeScores("bare-tilde.json", { scores: { "~z-ai/glm-latest": { score: 0.9 } } });
+  const [first] = await suggest(config(), path);
+  assert.equal(first?.target.model, "~z-ai/glm-latest");
+  assert.equal(first?.tier, "high");
+});
+
 test("suggest auto-calibrates from a decisions file", async () => {
   const good = `${DEFAULT_CONFIG.routes.standard[0].provider}/${DEFAULT_CONFIG.routes.standard[0].model}`;
   const bad = `${DEFAULT_CONFIG.routes.quick[0].provider}/${DEFAULT_CONFIG.routes.quick[0].model}`;

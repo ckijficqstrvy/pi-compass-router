@@ -45,7 +45,21 @@ function isRecord(value: unknown): value is Record<string, unknown> {
  * `score = 0.5 + 0.5 × (pos + 0.5×chosen − neg) / (pos + 0.5×chosen + neg + 1)`
  * ——落在 (0,1)；完全沒有事件的模型不會出現在表裡。
  */
-export function scoresFromHistory(records: readonly DecisionRecord[]): Record<string, { score: number; note: string }> {
+/** 只採計最近的歷史；`ts` 缺失或無法解析時保留（fail-open）。 */
+const HISTORY_WINDOW_DAYS = 90;
+
+function withinHistoryWindow(record: DecisionRecord, now: number): boolean {
+  const ts = (record as { ts?: unknown }).ts;
+  if (typeof ts !== "string") return true;
+  const parsed = Date.parse(ts);
+  if (!Number.isFinite(parsed)) return true;
+  return now - parsed <= HISTORY_WINDOW_DAYS * 24 * 60 * 60 * 1000;
+}
+
+export function scoresFromHistory(
+  records: readonly DecisionRecord[],
+  now: number = Date.now(),
+): Record<string, { score: number; note: string }> {
   const pos = new Map<string, number>();
   const neg = new Map<string, number>();
   const chosen = new Map<string, number>();
@@ -54,8 +68,11 @@ export function scoresFromHistory(records: readonly DecisionRecord[]): Record<st
     map.set(key, (map.get(key) ?? 0) + 1);
   };
   for (const record of records) {
+    if (!withinHistoryWindow(record, now)) continue;
     if (record.type === "route") {
-      if (record.outcome === "applied" || record.outcome === "held") bump(chosen, record.model);
+      // Only a real switch means the model was chosen; `held` also covers
+      // deadband/cooldown/cache holds where the router kept the current model.
+      if (record.outcome === "applied") bump(chosen, record.model);
     } else {
       bump(neg, record.from);
       bump(pos, record.to);
@@ -172,11 +189,9 @@ export async function suggest(
 
 /** key → Tier：用事實檔的 capability 與 profile 價格帶歸帶（經 Stage 3 選鏈）。 */
 function deriveTier(key: string, config: CompassConfig): Tier | undefined {
-  const slash = key.indexOf("/");
-  const provider = slash > 0 ? key.slice(0, slash) : "";
-  const model = slash > 0 ? key.slice(slash + 1) : key;
   if (!factsValid(MODEL_FACTS)) return undefined;
-  const fact = factFor(provider, model);
+  const want = targetFromKey(key);
+  const fact = factFor(want.provider, want.model);
   if (!fact) return undefined;
 
   // 找到「能力下限 ≤ 它」的最高可行層（用 Stage 3 同一條鏈驗證在帶內）。
@@ -184,7 +199,9 @@ function deriveTier(key: string, config: CompassConfig): Tier | undefined {
     const tier = TIERS[i];
     if (fact.capability < TIER_CAPABILITY_FLOOR[tier]) continue;
     const { chain } = selectTargets(tier, undefined, config);
-    if (chain.some((t) => t.model === model || `${t.provider}/${t.model}` === key)) return tier;
+    if (chain.some((target) => target.model === want.model && (!want.provider || target.provider === want.provider))) {
+      return tier;
+    }
   }
   // 能力夠但帶不符（例如價格超 ceiling）→ 落到最低可行層。
   return TIERS.find((tier) => fact.capability >= TIER_CAPABILITY_FLOOR[tier]);

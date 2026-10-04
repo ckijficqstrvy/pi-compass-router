@@ -1,6 +1,6 @@
 // route/compose.ts — Stage 2：demand / tier / thinking 組合（SPEC Part 5）。
 import type { CompassConfig, Tier, ThinkingLevel } from "../schema.js";
-import { TIERS, TIER_THINKING } from "../schema.js";
+import { TIERS, TIER_THINKING, THINKING_LEVELS } from "../schema.js";
 import type { Judgment } from "../classify/types.js";
 
 /** demand → thinking 的階梯（Part 5 Stage 2，實作常數）。 */
@@ -32,6 +32,16 @@ const WEIGHT_COMPLEXITY = 0.55;
 const WEIGHT_CAPABILITY = 0.45;
 const WEIGHT_DEEP_REASONING = 0.15;
 const DEMAND_MAX = 3;
+
+/**
+ * `judgment.thinking` 相對 demand 階梯最多能偏離幾階（2026-10-04 實測修正）。
+ *
+ * 實測發現本地分類器的 thinking 答案幾乎與 demand 無關（「1+1」→ xhigh、
+ * 「部署」→ max、複雜遷移 → minimal），因為它直接覆蓋 demand 階梯。
+ * 這裡把分類器答案限制在階梯 ±N 階內；低信心判斷不得高於階梯
+ * （與 W9「不可信的 kind 不該拉抬」一致）。修改須回填 SPEC。
+ */
+export const THINKING_CLAMP_RUNGS = 1;
 
 /** Stage 2 輸出（Part 5）。 */
 export interface ComposeResult {
@@ -70,6 +80,27 @@ function thinkingFromLadder(demand: number): ThinkingLevel {
     if (demand < rung.below) return rung.thinking;
   }
   return "xhigh";
+}
+
+/** thinking 在 THINKING_LEVELS 的階序（off=0 … max=last）。 */
+function thinkingRank(level: ThinkingLevel): number {
+  return THINKING_LEVELS.indexOf(level);
+}
+
+/**
+ * 把分類器的 thinking 答案夾回 demand 階梯附近（見 `THINKING_CLAMP_RUNGS`）。
+ * - 一律允許「階梯 ±N 階」；
+ * - 低信心（kind 不可信）不得高於階梯，只能持平或更低；
+ * - 超出窗格者直接落回階梯值（不猜中間值）。
+ */
+function clampJudgedThinking(judged: ThinkingLevel, demand: number, confident: boolean): ThinkingLevel {
+  const ladder = thinkingFromLadder(demand);
+  const base = thinkingRank(ladder);
+  const low = Math.max(0, base - THINKING_CLAMP_RUNGS);
+  const high = Math.min(THINKING_LEVELS.length - 1, base + (confident ? THINKING_CLAMP_RUNGS : 0));
+  const value = thinkingRank(judged);
+  if (value < low || value > high) return ladder;
+  return judged;
 }
 
 function clamp(value: number, low: number, high: number): number {
@@ -133,7 +164,7 @@ export function compose(judgment: Judgment | undefined, config: CompassConfig): 
     tier = "standard";
   }
 
-  return { demand, tier, thinking: resolveThinking(judgment, config, demand) };
+  return { demand, tier, thinking: resolveThinking(judgment, config, demand, confident) };
 }
 
 /**
@@ -143,10 +174,13 @@ export function compose(judgment: Judgment | undefined, config: CompassConfig): 
  * 第四層 `TIER_THINKING` 在此路徑不可達（階梯是全域函數，任何 demand
  * 都有對應 rung）；它實際生效於 `compose()` 開頭的分類失敗分支。
  * 兩者共用 schema 的同一張表，避免兩處定義漂移。
+ *
+ * `judgment.thinking` 會先經 `clampJudgedThinking()` 夾回 demand 階梯附近
+ *（2026-10-04 實測修正）；pin 不受限制（那是使用者顯式意圖）。
  */
-function resolveThinking(judgment: Judgment, config: CompassConfig, demand: number): ThinkingLevel {
+function resolveThinking(judgment: Judgment, config: CompassConfig, demand: number, confident: boolean): ThinkingLevel {
   const pin = config.thinking[judgment.kind] ?? config.thinking.pin;
   if (pin) return pin;
-  if (judgment.thinking) return judgment.thinking;
+  if (judgment.thinking) return clampJudgedThinking(judgment.thinking, demand, confident);
   return thinkingFromLadder(demand);
 }

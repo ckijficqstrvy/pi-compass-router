@@ -7,6 +7,7 @@ import {
   selectTargets,
   targetFromKey,
   targetKey,
+  tierOfModel,
 } from "../extensions/pi-compass-router/route/select.js";
 import { ceilingFor } from "../extensions/pi-compass-router/policy/filter.js";
 import { factFor } from "../extensions/pi-compass-router/policy/facts.js";
@@ -108,6 +109,24 @@ test("specialistPriority orders specialists ahead of the tier chain", () => {
     chain.map((x) => x.model),
     ["first", "second", "t"],
   );
+});
+
+test("selectTargets dedupes a model that appears in both specialist and tier chains (F7)", () => {
+  const cfg = config({
+    kindModels: { plan: [{ provider: "openrouter", model: "dup" }] },
+    routes: {
+      ...config().routes,
+      high: [{ provider: "openrouter", model: "dup" }, { provider: "openrouter", model: "t1" }],
+    },
+  });
+  const { chain } = selectTargets("high", judgment(), cfg);
+  assert.deepStrictEqual(chain.map((t) => t.model), ["dup", "t1"]);
+});
+
+test("tierOfModel ignores a non-last null ceiling instead of returning it (F2)", () => {
+  const cfg = config({ ceilings: { quick: null } });
+  assert.notEqual(tierOfModel(cfg, "openrouter", "openai/gpt-6.1-sol"), "quick");
+  assert.equal(tierOfModel(cfg, "openrouter", "openai/gpt-6.1-sol"), "premium");
 });
 
 test("freePool enters only when the tier chain is empty", () => {
@@ -218,6 +237,19 @@ test("a menu pick denied by policy is rejected with a note", () => {
   const result = selectTargets("high", j, cfg);
   assert.equal(result.picked, undefined);
   assert.match(result.notes[0], /denied by policy/);
+});
+
+test("a menu pick that is an explicit prefer head keeps explicit and passes policy (F6)", () => {
+  const cfg = config({
+    modelPick: "menu",
+    allowProviders: ["openrouter"],
+    kindModels: {},
+    routes: { ...config().routes, high: [{ provider: "", model: "~x-ai/grok-latest", explicit: true }] },
+  });
+  const result = selectTargets("high", judgment({ modelPick: "~x-ai/grok-latest" }), cfg);
+  assert.equal(result.picked?.model, "~x-ai/grok-latest");
+  assert.equal(result.picked?.explicit, true, "explicit survives the allowProviders gate");
+  assert.equal(result.chain[0]?.explicit, true, "the hoisted head keeps the flag");
 });
 
 test("modelPick: off ignores judgment.modelPick entirely", () => {

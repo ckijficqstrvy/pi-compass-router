@@ -15,6 +15,10 @@ interface BootOptions {
   hasUI?: boolean;
   /** 設了就在 config 寫 prefer.standard=[id]，測 prefer 解析。 */
   prefer?: string;
+  /** true = session 還沒有任何訊息（首則），測 continuation 不該觸發。 */
+  firstMessage?: boolean;
+  /** 額外寫進 config.json 的鍵（測警告顯示）。 */
+  rawConfig?: Record<string, unknown>;
 }
 
 /** 建一個獨立的 HOME（config 檔在裡面），再動態載入擴充——行程層級隔離。 */
@@ -38,6 +42,7 @@ async function boot(options: BootOptions = {}) {
       },
       kindModels: {},
       ...(options.prefer ? { prefer: { standard: [options.prefer] } } : {}),
+      ...(options.rawConfig ?? {}),
     }),
   );
   process.env.HOME = home;
@@ -93,6 +98,12 @@ async function boot(options: BootOptions = {}) {
       getAll: () => Object.values(models),
     },
     getContextUsage: () => ({ tokens: 1000, contextWindow: 200000, percent: 1 }),
+    sessionManager: {
+      getBranch: () =>
+        options.firstMessage
+          ? []
+          : [{ type: "message", message: { role: "user", content: "earlier prompt" } }],
+    },
     hasUI: options.hasUI ?? true,
     mode: "tui",
     signal: new AbortController().signal,
@@ -270,6 +281,42 @@ test("a short prompt takes the continuation path through Stage 5 (T3)", async ()
     assert.equal(entry.reason, "continuation");
     assert.equal(entry.symbol, "×");
     assert.equal(thinkings[thinkings.length - 1], "low", "skipped applies thinking (W10)");
+  } finally {
+    cleanup();
+  }
+});
+
+test("a short FIRST prompt is classified, not skipped as a continuation", async () => {
+  const { handlers, ctx, appends, setModels, cleanup } = await boot({ firstMessage: true });
+  try {
+    await handlers["before_agent_start"]({ prompt: "ok" }, ctx);
+    const entry = appends[0] as { reason?: string };
+    assert.notEqual(entry.reason, "continuation", "SPEC Stage 1: first message is never a continuation");
+    assert.deepEqual(setModels, ["openrouter/m1"], "short first prompt still routes");
+  } finally {
+    cleanup();
+  }
+});
+
+test("the route entry carries the demand/budget fields the display exposes (F3)", async () => {
+  const { handlers, ctx, appends, cleanup } = await boot();
+  try {
+    await handlers["before_agent_start"]({ prompt: "implement a streaming parser with tests" }, ctx);
+    const entry = appends[appends.length - 1] as { demand?: number; budgetPressure?: number };
+    assert.equal(typeof entry.demand, "number");
+    assert.equal(typeof entry.budgetPressure, "number");
+  } finally {
+    cleanup();
+  }
+});
+
+test("config warnings are surfaced at session start (F1)", async () => {
+  const { notices, cleanup } = await boot({ rawConfig: { totallyMadeUp: 1 } });
+  try {
+    assert.ok(
+      notices.some((n) => n.type === "warning" && n.message.includes("totallyMadeUp")),
+      JSON.stringify(notices),
+    );
   } finally {
     cleanup();
   }

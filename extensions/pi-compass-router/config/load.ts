@@ -508,6 +508,23 @@ function invariantWarnings(config: CompassConfig): string[] {
   nonNegative("cache.maxPenaltyUsd", config.cache.maxPenaltyUsd);
   nonNegative("cache.bypassTierDelta", config.cache.bypassTierDelta);
   nonNegative("cache.cooldownSeconds", config.cache.cooldownSeconds);
+
+  // An unbounded (null) ceiling may only appear as a suffix. A finite tier after
+  // one would be shadowed; sliceBands/tierOfModel already ignore the stray null,
+  // but the user should still be told the config is inconsistent.
+  let sawUnbounded = false;
+  for (const tier of TIERS) {
+    if (tier === "xpremium" && !config.xpremium.enabled) continue;
+    const ceiling = ceilingFor(config, tier);
+    if (ceiling === null) {
+      sawUnbounded = true;
+    } else if (sawUnbounded) {
+      warnings.push(
+        `ceilings.${tier} is finite after an unbounded lower tier — the unbounded tier cannot own the remainder; ignoring it`,
+      );
+      break;
+    }
+  }
   return warnings;
 }
 

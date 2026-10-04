@@ -563,6 +563,17 @@ demand ladder（實作常數，定義在 `route/compose.ts`；修改任一閾值
 tier 預設 `TIER_THINKING`：`quick: off / standard: low / high: medium /
 premium: high / xpremium: max`。
 
+**thinking clamp（2026-10-04 實測補）**：本地分類器的 `thinking` 答案實測與
+demand 幾乎無關（「1+1」→ xhigh、「部署」→ max、複雜遷移 → minimal），
+而原句讓它**直接覆蓋** demand 階梯，會放大推理成本。故 `judgment.thinking`
+先夾回 demand 階梯附近（`THINKING_CLAMP_RUNGS = 1`）：
+
+- 一律允許階梯 ±1 階；超出窗格者直接落回階梯值（不猜中間值）。
+- `kindConfidence < confidenceThreshold` 時窗格上限為階梯本身
+  （低信心不得高於階梯，與信心守衛一致）。
+
+`config.thinking` 的 pin（顯式意圖）不受此限。
+
 **信心守衛（在階梯之後，且優先於層級 floor）**：
 `kindConfidence < confidenceThreshold` 時，**無論 `kindMinimumTier` 給什麼**，
 tier 一律落回 `standard`。理由：信心低代表「連這是不是 plan 都不確定」，
@@ -829,6 +840,25 @@ pressure = max(today÷dailyUsd, month÷monthlyUsd)
 > 同時寫會掉更新。現在以 `mkdir` 原子鎖（`state.json.lock`，逾時 2s
 > 視為持有者已死並搶回）互斥，並以 temp + `rename` 原子落檔；
 > 拿不到鎖仍會寫（best-effort），**記帳永不擋住回合**。
+
+### 8.4 provider/model 錯誤迴避（2026-10-04 實測補）
+
+模型商 429／額度或付費失敗／5xx 之後，下一輪 auto 路由必須**避開**，並在
+**畫面說明**。`message_end` 的 assistant 訊息是權威來源（`provider`／
+`model`／`stopReason`／`errorMessage`／`rawStopReason`）：
+
+- 只處理 `stopReason === "error"`。`classifyModelError()` 分類成
+  `rate_limit`（429，60s）、`quota`（402／額度，30m）、`auth`（401/403，6h）、
+  `server`（5xx，60s）、`timeout`（連線，30s）。
+- **context overflow 一律不標記**（`context_length_exceeded` 等）：pi 會自行
+  壓縮後重試，不是故障。
+- `quota`／`auth` 是帳號層級 → 同時標記整個 provider；其餘只標記該 model。
+- 成功回應即清除該 model 的冷卻。
+- 狀態存 `health.json`（0600、只存非內容欄位、過期即丟）。路由端在
+  `deps.isAvailable` 透過 `coolingReason()` 查詢，`planTurn` 維持純函式；
+  被跳過的候選寫進 entry notes。
+- 失敗當下寫一則 `×` entry 並 `ui.notify`：
+  `<model> failed (<label>) — avoiding for <duration>`。
 
 ---
 
@@ -1443,3 +1473,23 @@ push 與 pull_request 皆觸發。
 - 不從 git 歷史取出上游版本對照；
 - 新增功能先補規格再寫程式；
 - 任何發現規格不足處，回填本檔並註記日期。
+
+---
+
+## Part 14 — 2026-10-04 覆核修正（實測）
+
+以真 laya 分類器 + 真 `models-store.json` 實跑一輪後的修正，逐項對應本檔條文：
+
+| # | 修正 | 對應條文 |
+| --- | --- | --- |
+| 1 | provider/model 故障迴避與畫面說明（`health.ts`、`message_end`、`deps.isAvailable`） | Part 8.4（新增） |
+| 2 | `judgment.thinking` 夾回 demand 階梯 ±1（低信心不得高於階梯） | Part 5 Stage 2 |
+| 3 | 設定警告在 `session_start` 與 `/compass-set` 後以 UI 顯示 | Part 3.4 |
+| 4 | `ceilings` 的 `null`（無上限）只允許出現在尾端；非尾端的 null 被忽略並警告 | Part 9 價格帶 |
+| 5 | continuation 只在**非首則**訊息觸發；首則短訊息仍分類 | Part 5 Stage 1 |
+| 6 | menu gate 若候選已在鏈上，取原 Target 以保留 `explicit`（L3 不被 `allowProviders` 誤殺） | Part 5 Stage 3 |
+| 7 | `selectTargets` 依 `targetKey` 保序去重（專家鏈與層級鏈重疊不再重複） | Part 5 Stage 3 |
+| 8 | `suggest` 的 `deriveTier` 走唯一 `targetFromKey` codec；歷史只採計最近 90 天且只有 `applied` 算 chosen | Part 10.1 |
+| 9 | entry 補齊 `kind`/`scoring`/`budgetPressure`/`picked`/`thinking.judged`（`display.fields` 的 budget 不再是死旋鈕） | Part 5 Stage 5、Part 10.4 |
+| 10 | `freeOnly` 回退到 `freePool`/付費層級時寫入 notes；`compact` dry-run 標示未檢查可用性/預算 | Part 5 Stage 3、Part 10.1 |
+| 11 | `conversationText` 收 `readonly unknown[]`，移除 `index.ts` 的 `as never` | Part 11 相依 |

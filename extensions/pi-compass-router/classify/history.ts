@@ -41,13 +41,14 @@ function textOf(content: unknown): string {
  * - 超過 `maxChars` 從**尾端**截（保留最近的上下文）
  */
 export function conversationText(
-  entries: readonly EntryLike[],
+  entries: readonly unknown[],
   turns: number,
   maxChars: number = CONVERSATION_MAX_CHARS,
 ): string | undefined {
   if (!Number.isFinite(turns) || turns <= 0) return undefined;
   const messages: string[] = [];
-  for (const entry of entries) {
+  for (const raw of entries) {
+    const entry = raw as EntryLike | null | undefined;
     if (entry?.type !== "message") continue;
     const role = entry.message?.role;
     if (role !== "user" && role !== "assistant") continue;

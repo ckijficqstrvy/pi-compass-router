@@ -60,15 +60,17 @@ function orderSpecialists(chain: Target[], kind: string, config: CompassConfig):
  * 無零元模型 → 回退 `freePool.models`（若 enabled）→ 再回退 `routes[tier]`
  * （fail-open：不因沒有免費模型就無路由）。
  */
-function freeOnlyChain(config: CompassConfig, tier: Tier): Target[] {
+function freeOnlyChain(config: CompassConfig, tier: Tier): { chain: Target[]; fallback: "freePool" | "paid" | null } {
   if (factsValid(MODEL_FACTS)) {
     const zero = rankedFacts(MODEL_FACTS)
       .filter((fact) => fact.price !== undefined && fact.price.input === 0 && fact.price.output === 0)
       .map((fact) => ({ provider: fact.provider, model: fact.model }));
-    if (zero.length > 0) return zero;
+    if (zero.length > 0) return { chain: zero, fallback: null };
   }
-  if (config.freePool.enabled && config.freePool.models.length > 0) return [...config.freePool.models];
-  return [...config.routes[tier]];
+  if (config.freePool.enabled && config.freePool.models.length > 0) {
+    return { chain: [...config.freePool.models], fallback: "freePool" };
+  }
+  return { chain: [...config.routes[tier]], fallback: "paid" };
 }
 
 /**
@@ -81,9 +83,7 @@ function freeOnlyChain(config: CompassConfig, tier: Tier): Target[] {
  * **條目是 explicit** 或 **未評分但已允許**」——否則 `allowUnratedPicks: true`
  * 的路徑永遠走不到閘 3。真正的「已評分」是閘 3（`unrated model`），只看事實檔。
  */
-function menuGate(key: string, tier: Tier, config: CompassConfig): string | null {
-  const target = targetFromKey(key);
-
+function menuGate(key: string, tier: Tier, config: CompassConfig, target: Target): string | null {
   // 閘 1 registry：事實檔有此事實，或條目是 explicit，或已允許未評分。
   const fact = target.provider ? factFor(target.provider, target.model) : factFor("", target.model);
   if (!fact && !target.explicit && !config.allowUnratedPicks) return "not in registry";
@@ -153,6 +153,19 @@ export interface SelectResult {
  * 試（Stage 4 實作契約第 1 點：`guard` 沒有 registry 的存取權，同理 Stage 3
  * 也不該在這裡假裝知道模型是否「存在且已認證」）。
  */
+/** 依 `targetKey` 保序去重（第一筆優先）。 */
+function dedupeChain(chain: readonly Target[]): Target[] {
+  const seen = new Set<string>();
+  const out: Target[] = [];
+  for (const target of chain) {
+    const key = targetKey(target);
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push(target);
+  }
+  return out;
+}
+
 export function selectTargets(
   tier: Tier,
   judgment: Judgment | undefined,
@@ -167,9 +180,15 @@ export function selectTargets(
       model,
       explicit: true,
     }));
-    const body = freeOnlyChain(config, tier).filter(
+    const fallbackChain = freeOnlyChain(config, tier);
+    const body = fallbackChain.chain.filter(
       (target) => !explicitHeads.some((head) => head.model === target.model),
     );
+    if (fallbackChain.fallback === "paid") {
+      notes.push("no verified $0 model — paid fallback (freeOnly is not a hard guarantee)");
+    } else if (fallbackChain.fallback === "freePool") {
+      notes.push("no verified $0 model — using freePool fallback");
+    }
     return { chain: [...explicitHeads, ...body], notes };
   }
 
@@ -192,19 +211,24 @@ export function selectTargets(
     chain.push(...config.freePool.models);
   }
 
-  // menu 選項先於上述所有（通過閘才頂置，否則退回鏈）。
+  // 同一模型可同時來自專家鏈與層級鏈：保序去重，避免重試同一個候選（W7）。
+  const candidates = dedupeChain(chain);
+
+  // menu 選項先於上述所有（通過閘才頂置，否則退回鏈）。候選若已在鏈上，
+  // 取鏈上的原始 Target（保留 explicit），否則才由 key 反解。
   const picked = judgment?.modelPick;
   if (picked !== undefined && config.modelPick === "menu") {
-    const gate = menuGate(picked, tier, config);
+    const found = candidates.find((target) => targetKey(target) === picked);
+    const head = found ?? targetFromKey(picked);
+    const gate = menuGate(picked, tier, config, head);
     if (gate === null) {
-      const head = targetFromKey(picked);
-      const rest = chain.filter((target) => targetKey(target) !== targetKey(head));
+      const rest = candidates.filter((target) => targetKey(target) !== targetKey(head));
       return { chain: [head, ...rest], picked: head, notes };
     }
     notes.push(gate);
   }
 
-  return { chain, notes };
+  return { chain: candidates, notes };
 }
 
 /**
@@ -218,10 +242,20 @@ export function tierOfModel(config: CompassConfig, provider: string, model: stri
   const fact = provider ? factFor(provider, model) : factFor("", model);
   if (!fact || fact.price === undefined) return null;
   const price = blendedOf(fact.price);
-  for (const tier of TIER_ORDER) {
+  for (let index = 0; index < TIER_ORDER.length; index += 1) {
+    const tier = TIER_ORDER[index];
     if (tier === "xpremium" && !config.xpremium.enabled) continue;
     const ceiling = ceilingFor(config, tier);
-    if (ceiling === null || price <= ceiling) return tier;
+    // An unbounded tier may only claim the remainder when no higher enabled
+    // tier has a finite cap; otherwise a lower null would shadow every tier.
+    if (ceiling === null) {
+      const higherCapped = TIER_ORDER.slice(index + 1).some(
+        (higher) => higher !== "xpremium" || config.xpremium.enabled,
+      );
+      if (!higherCapped) return tier;
+      continue;
+    }
+    if (price <= ceiling) return tier;
   }
   return null;
 }

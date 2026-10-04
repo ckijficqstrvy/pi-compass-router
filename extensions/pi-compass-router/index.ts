@@ -6,13 +6,23 @@ import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-a
 import { Type } from "typebox";
 
 import { loadConfig, validatePatch, writeConfigPatch } from "./config/load.js";
-import { loadSpend, recordSpend } from "./budget.js";
+import { computePressure, loadSpend, recordSpend } from "./budget.js";
 import { planTurn, type CostRates, type PlanDeps, type PlanSnapshot } from "./route/plan.js";
 import { compose } from "./route/compose.js";
 import { selectTargets, targetKey, tierOfModel } from "./route/select.js";
 import { applyRoute, type ApplyHooks } from "./route/apply.js";
 import { runFactsRefresh } from "./ui/facts-refresh.js";
 import { appendDecision } from "./decisions.js";
+import {
+  classifyModelError,
+  coolingReason,
+  formatDuration,
+  loadHealth,
+  ModelHealth,
+  remainingSeconds,
+  saveHealth,
+  type ModelFailure,
+} from "./health.js";
 import { createLayaClassifier } from "./classify/laya.js";
 import { conversationText } from "./classify/history.js";
 import { classifyInStages } from "./classify/flow.js";
@@ -57,11 +67,16 @@ interface SessionState {
   };
   /** 本次 session 的切換次數（`/compass status` 的 `switches: N`）。 */
   switches: number;
+  /** provider/model 健康狀態（錯誤迴避，SPEC Part 8.4）。 */
+  health: ModelHealth;
+  /** 最近一次載入設定的警告（Part 3.4；session_start 顯示）。 */
+  configWarnings: string[];
 }
 
 /** 追蹤 session 狀態（工廠不啟動行程，狀態在 session_start 填）。 */
 function createState(): SessionState {
-  return { config: loadConfig().config, switches: 0 };
+  const { config, warnings } = loadConfig();
+  return { config, switches: 0, health: loadHealth(), configWarnings: warnings };
 }
 
 /** 當前模型 → Target 形狀（`provider/id` + 推導層級，供 guard stickiness/deadband）。 */
@@ -123,10 +138,23 @@ function snapshotFor(ctx: ExtensionContext, config: CompassConfig, state: Sessio
   };
 }
 
-/** PlanDeps（同上）。 */
-function depsFor(ctx: ExtensionContext): PlanDeps {
+/**
+ * PlanDeps（同上）。health 提供時，處於冷卻的 provider/model 會被視為不可用
+ *（Part 8.4）；`avoided` 收集被跳過的候選字串，供 entry 說明用。
+ */
+function depsFor(ctx: ExtensionContext, health?: ModelHealth, avoided?: string[]): PlanDeps {
   return {
-    isAvailable: (candidate) => resolveModel(ctx, candidate) !== undefined,
+    isAvailable: (candidate) => {
+      if (resolveModel(ctx, candidate) === undefined) return false;
+      if (health) {
+        const bad = coolingReason(health, candidate.provider, candidate.model);
+        if (bad) {
+          avoided?.push(`${candidate.provider}/${candidate.model} (${bad.label})`);
+          return false;
+        }
+      }
+      return true;
+    },
     costOf: (candidate) => costRatesOf(resolveModel(ctx, candidate)),
   };
 }
@@ -151,7 +179,7 @@ async function dryRun(
         request: text,
         kinds: kindsOf(config),
         conversation: ctx
-          ? conversationText((ctx.sessionManager?.getBranch?.() ?? []) as never, config.classify.historyTurns)
+          ? conversationText(ctx.sessionManager?.getBranch?.() ?? [], config.classify.historyTurns)
           : undefined,
       },
       config,
@@ -163,12 +191,14 @@ async function dryRun(
   if (!ctx) {
     const selected = selectTargets(composed.tier, judgment, config);
     const first = selected.picked ?? selected.chain[0];
-    return `${kind} · demand ${composed.demand.toFixed(2)} · tier ${composed.tier}${first ? ` → ${targetKey(first)}` : " → (no route)"}`;
+    return `${kind} · demand ${composed.demand.toFixed(2)} · tier ${composed.tier}${first ? ` → ${targetKey(first)}` : " → (no route)"} (estimate: availability/budget not checked)`;
   }
-  const plan = planTurn(judgment, config, snapshotFor(ctx, config, state), depsFor(ctx));
+  const avoided: string[] = [];
+  const plan = planTurn(judgment, config, snapshotFor(ctx, config, state), depsFor(ctx, state.health, avoided));
   const target = plan.target ? targetKey(plan.target) : "(no route available)";
   const reason = plan.guard?.reason ? ` · ${plan.guard.reason}` : "";
-  return `${kind} · demand ${composed.demand.toFixed(2)} · tier ${plan.guard?.tier ?? composed.tier} → ${target}${reason}`;
+  const avoidNote = avoided.length > 0 ? ` · avoiding ${[...new Set(avoided)].join("; ")}` : "";
+  return `${kind} · demand ${composed.demand.toFixed(2)} · tier ${plan.guard?.tier ?? composed.tier} → ${target}${reason}${avoidNote}`;
 }
 
 async function routeTurn(
@@ -179,6 +209,8 @@ async function routeTurn(
 ): Promise<void> {
   const config = state.config;
   if (!config.enabled) return;
+  const branch = ctx.sessionManager?.getBranch?.() ?? [];
+  const isFirstMessage = branch.length === 0;
   const nowModel = currentTarget(ctx, config)?.model ?? null;
   // #8 手動換模型：上一輪我們預期在位的模型與現在不同 → 記一筆 feedback。
   // 限制：無法區分「使用者自己換」與「其他擴充換」，已知取捨（2026-10-03）。
@@ -192,8 +224,9 @@ async function routeTurn(
       kind: state.lastDecision?.kind,
     });
   }
-  // 過短 → continuation（Part 5 Stage 1），直接 skipped。
-  if (prompt.length < config.classify.minPromptChars) {
+  // 過短 → continuation（Part 5 Stage 1），直接 skipped。**首則訊息不算
+  // continuation**：第一句就算短也應被分類，否則開場永遠不路由。
+  if (prompt.length < config.classify.minPromptChars && !isFirstMessage) {
     // W10（2026-10-03）：skipped 也走 Stage 5——SPEC 說所有模式的 skipped 都
     // 要套 thinking（修正陳舊層級）；entry 也由同一條管線產生。
     const skippedHooks = buildHooks(pi, ctx);
@@ -222,10 +255,7 @@ async function routeTurn(
         request: prompt,
         kinds: kindsOf(config),
         // W6：historyTurns > 0 時才組（Part 4.4 預設 0＝不送）。
-        conversation: conversationText(
-          (ctx.sessionManager?.getBranch?.() ?? []) as never,
-          config.classify.historyTurns,
-        ),
+        conversation: conversationText(branch, config.classify.historyTurns),
       },
       config,
       signal,
@@ -236,18 +266,33 @@ async function routeTurn(
   // 環境快照全部來自這裡（含 currentTier / lastSwitchAtMs / contextTokens /
   // 費率）——這正是 2026-10-03 前缺失、使 cache/cooldown 空轉的那段接線。
   const current = currentTarget(ctx, config);
-  const plan = planTurn(judgment, config, snapshotFor(ctx, config, state), depsFor(ctx));
+  const snapshot = snapshotFor(ctx, config, state);
+  const avoided: string[] = [];
+  const plan = planTurn(judgment, config, snapshot, depsFor(ctx, state.health, avoided));
+  const entryNotes = healthNotes(plan.notes, avoided);
+  const budgetPressure = computePressure(snapshot, config);
+  const entryMeta = {
+    kind: judgment?.kind,
+    kindConfidence: judgment?.kindConfidence,
+    complexity: judgment?.complexity,
+    capability: judgment?.capability,
+    deepReasoning: judgment?.deepReasoning,
+    budgetPressure,
+    picked: judgment?.modelPick,
+    judgedThinking: judgment?.thinking,
+  };
 
   if (plan.unavailable || !plan.target || !plan.guard) {
     const skippedHooks = buildHooks(pi, ctx);
     await applyRoute(
       {
         outcome: "skipped",
+        ...entryMeta,
         thinking: plan.composed.thinking,
         mode: config.mode,
         tier: plan.composed.tier,
         skipReason: "no route available",
-        notes: plan.notes,
+        notes: entryNotes,
       },
       skippedHooks,
     );
@@ -276,6 +321,7 @@ async function routeTurn(
   const outcome = await applyRoute(
     {
       outcome: result.outcome,
+      ...entryMeta,
       target: available,
       thinking: plan.composed.thinking,
       mode: config.mode,
@@ -285,7 +331,7 @@ async function routeTurn(
         ? { source: judgment.source, latencyMs: judgment.latencyMs, hit: judgment.cacheHit ?? false }
         : { source: "fallback", latencyMs: 0, hit: false },
       demand: plan.composed.demand,
-      notes: plan.notes,
+      notes: entryNotes,
       cacheMissUsd: plan.cacheMissUsd,
     },
     hooks,
@@ -303,6 +349,7 @@ async function routeTurn(
       const applied = await applyRoute(
         {
           outcome: "applied",
+          ...entryMeta,
           target: available,
           thinking: plan.composed.thinking,
           mode: "auto",
@@ -312,7 +359,7 @@ async function routeTurn(
             ? { source: judgment.source, latencyMs: judgment.latencyMs, hit: judgment.cacheHit ?? false }
             : { source: "fallback", latencyMs: 0, hit: false },
           demand: plan.composed.demand,
-          notes: plan.notes,
+          notes: entryNotes,
           cacheMissUsd: plan.cacheMissUsd,
         },
         hooks,
@@ -326,8 +373,9 @@ async function routeTurn(
         symbol: "×",
         tier: result.tier,
         target: available,
+        ...entryMeta,
         reason: "cancelled in confirm",
-        notes: plan.notes,
+        notes: entryNotes,
         classify: judgment
           ? { source: judgment.source, latencyMs: judgment.latencyMs, hit: judgment.cacheHit ?? false }
           : { source: "fallback", latencyMs: 0, hit: false },
@@ -344,8 +392,9 @@ async function routeTurn(
       symbol: "×",
       tier: result.tier,
       target: available,
+      ...entryMeta,
       reason: "confirm required UI; not applied",
-      notes: plan.notes,
+      notes: entryNotes,
       demand: plan.composed.demand,
     });
     symbol = "×";
@@ -418,6 +467,37 @@ function writeEntry(pi: ExtensionAPI, entry: RouteEntry): void {
 }
 
 /**
+ * 把「因健康狀態被跳過的候選」併進 entry notes（去重，SPEC Part 8.4）。
+ */
+function healthNotes(notes: string[] | undefined, avoided: readonly string[]): string[] | undefined {
+  if (avoided.length === 0) return notes;
+  return [...(notes ?? []), `avoiding unhealthy: ${[...new Set(avoided)].join("; ")}`];
+}
+
+/**
+ * provider/model 失敗時，寫一則 transcript entry（不進 LLM context）並以 UI
+ * 通知說明（Part 8.4「在畫面上說明」）。entry 符號用 `×`。
+ */
+function explainModelFailure(
+  pi: ExtensionAPI,
+  ctx: ExtensionContext,
+  provider: string,
+  model: string,
+  failure: ModelFailure,
+  scope: "model" | "provider",
+): void {
+  const what = scope === "model" ? `${provider}/${model}` : `provider ${provider}`;
+  const reason = `${what} failed (${failure.label}) — avoiding for ${formatDuration(remainingSeconds(failure))}`;
+  writeEntry(pi, {
+    symbol: "×",
+    tier: null,
+    target: scope === "model" ? { provider, model } : null,
+    reason,
+  });
+  if (ctx?.hasUI) ctx.ui.notify(`compass: ${reason}`, "warning");
+}
+
+/**
  * 載入設定，並依**分類器輸入是否變動**決定要不要重建分類器
  *（`classify/lifecycle.ts`）。回載入後的設定（`/compass-set` 重繪用）。
  *
@@ -426,6 +506,7 @@ function writeEntry(pi: ExtensionAPI, entry: RouteEntry): void {
  */
 function reloadConfig(state: SessionState): CompassConfig {
   const result = loadConfig();
+  state.configWarnings = result.warnings;
   reloadClassifier(state, result.config, (config) => {
     if (config.classify.provider === "laya") return createLayaClassifier(config);
     if (config.classify.provider === "cloud") return createCloudClassifier(config);
@@ -444,7 +525,12 @@ export default function compass(pi: ExtensionAPI): void {
   // session lifecycle：載入設定 + 預熱 laya（由 reloadConfig 重建時預熱，
   // 輸入沒變則沿用既有的暖子行程）；關閉時拆除。
   pi.on("session_start", (_event, ctx) => {
+    // 跨行程讀回其他 session 標記的健康狀態（Part 8.4；best-effort）。
+    state.health = loadHealth();
     reloadConfig(state);
+    if (ctx?.hasUI && state.configWarnings.length > 0) {
+      ctx.ui.notify(`compass config:\n${state.configWarnings.slice(0, 5).join("\n")}`, "warning");
+    }
     // 事實檔過舊（>14 天）：主動提醒一次可一鍵更新（/compass refresh-facts）。
     if (ctx?.hasUI) {
       const age = factsAgeDays(MODEL_FACTS.generatedAt);
@@ -458,14 +544,43 @@ export default function compass(pi: ExtensionAPI): void {
   });
   // W1（2026-10-03 審查）：主要成本=assistant 回覆。先前只記 cloud 分類費，
   // 導致 budget pressure 幾乎恆為 0。以權威 usage.cost.total 記一次。
-  pi.on("message_end", (event) => {
+  // 2026-10-04（實測）：同一則訊息也是 provider 故障的唯一權威來源——
+  // `stopReason`/`errorMessage` 決定是否標記健康狀態並在下一輪避開。
+  pi.on("message_end", (event, ctx) => {
     const message = event.message;
     if (message.role !== "assistant") return;
     const total = message.usage?.cost?.total;
     if (typeof total === "number" && total > 0) recordSpend(total);
+
+    const provider = message.provider;
+    const modelId = message.model;
+    if (!provider || !modelId) return;
+    const modelKey = `${provider}/${modelId}`;
+
+    if (message.stopReason === "error") {
+      const failure = classifyModelError(message.errorMessage, message.rawStopReason);
+      if (!failure) return; // context overflow 等：pi 會自行重試，不標記
+      const alreadyCooling =
+        state.health.isCoolingDown(modelKey) || state.health.isCoolingDown(`provider:${provider}`);
+      const marked = state.health.markFailure(provider, modelId, failure.klass);
+      saveHealth(state.health);
+      if (!alreadyCooling) {
+        // 額度/認證是帳號層級：說明整個 provider 被避開，否則只說這個模型。
+        if (marked.provider) explainModelFailure(pi, ctx, provider, modelId, marked.provider, "provider");
+        else explainModelFailure(pi, ctx, provider, modelId, marked.model, "model");
+      }
+      return;
+    }
+
+    // 成功回應 → 該模型恢復健康（清除冷卻）。
+    if (state.health.isCoolingDown(modelKey)) {
+      state.health.clearModel(provider, modelId);
+      saveHealth(state.health);
+    }
   });
 
   pi.on("session_shutdown", () => {
+    saveHealth(state.health);
     state.classifier?.dispose?.();
     state.classifier = undefined;
   });
@@ -603,6 +718,9 @@ function registerCommands(pi: ExtensionAPI, state: SessionState): void {
         },
       };
       await runSettingsWizard(state.config, hooks);
+      if (ctx.hasUI && state.configWarnings.length > 0) {
+        ctx.ui.notify(`compass config:\n${state.configWarnings.slice(0, 5).join("\n")}`, "warning");
+      }
     },
   });
 
@@ -630,6 +748,17 @@ async function showStatus(ctx: ExtensionContext, state: SessionState, why = fals
     `model ${current} · switches ${state.switches}${cacheMiss} · profile ${state.config.profile}`,
     `routes quick[${state.config.routes.quick.length}] standard[${state.config.routes.standard.length}] high[${state.config.routes.high.length}]`,
   ];
+  const unhealthy = state.health.list();
+  if (unhealthy.length > 0) {
+    lines.push(
+      `unhealthy ${unhealthy
+        .map((failure) => `${failure.key} (${failure.label}, ${formatDuration(remainingSeconds(failure))})`)
+        .join(" · ")}`,
+    );
+  }
+  if (state.configWarnings.length > 0) {
+    lines.push(`config warnings ${state.configWarnings.length}: ${state.configWarnings[0]}`);
+  }
   if (why) {
     lines.push(`classify ${state.config.classify.provider} · timeout ${state.config.classify.timeoutMs}ms`);
     const d = state.lastDecision;

@@ -31,8 +31,20 @@ export interface ApplyDecision {
   reason?: string;
   /** 分類資訊（entry 的 `classify` 欄）。 */
   classify?: { source: string; latencyMs: number; hit: boolean };
+  /** 分類結果（entry 的 task / scoring 欄）。 */
+  kind?: string;
+  kindConfidence?: number;
+  complexity?: number;
+  capability?: number;
+  deepReasoning?: number;
   /** composed demand（entry 展開欄）。 */
   demand?: number;
+  /** 預算壓力（0–1，entry 的 budget 欄）。 */
+  budgetPressure?: number;
+  /** menu 選中的 id（entry 展開欄）。 */
+  picked?: string;
+  /** 分類器判的思考層級（entry 顯示 resolved 之外的 judged）。 */
+  judgedThinking?: ThinkingLevel;
   /** 估算的 prompt-cache miss 成本（USD，Part 7）；未知不寫。 */
   cacheMissUsd?: number;
   /** menu gate 拒絕 notes。 */
@@ -92,11 +104,18 @@ export async function applyRoute(
     symbol,
     tier: decision.tier ?? null,
     target: target ?? null,
+    kind: decision.kind,
+    kindConfidence: decision.kindConfidence,
+    complexity: decision.complexity,
+    capability: decision.capability,
+    deepReasoning: decision.deepReasoning,
     reason: decision.reason ?? decision.skipReason,
     notes: decision.notes,
     classify: decision.classify,
     demand: decision.demand,
-    thinking: { resolved: thinking },
+    budgetPressure: decision.budgetPressure,
+    picked: decision.picked,
+    thinking: { resolved: thinking, judged: decision.judgedThinking },
   };
   if (decision.notes && decision.notes.length > 0) entry.notes = decision.notes;
   if (decision.cacheMissUsd !== undefined) entry.cacheMissUsd = decision.cacheMissUsd;
@@ -155,7 +174,7 @@ export async function applyRoute(
       const read = hooks.readThinkingLevel?.();
       if (read !== undefined) {
         result.appliedThinking = read;
-        entry.thinking = { resolved: thinking, applied: read };
+        entry.thinking = { resolved: thinking, judged: decision.judgedThinking, applied: read };
       }
     } catch (e) {
       // thinking 套用失敗不改模型切換結果，但記錄（不讓 entry 假裝成功）。
