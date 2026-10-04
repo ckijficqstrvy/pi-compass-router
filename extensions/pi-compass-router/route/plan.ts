@@ -106,7 +106,8 @@ export function planTurn(
 
   // W8（2026-10-03）：以 **registry 即時價格**重驗價格天花板——靜態 facts 可能
   // 過期；未知價格不擋（fail-open）。
-  const ceiling = ceilingFor(config, composed.tier);
+  // N3（複審）：預算降級後要用**有效層級**的天花板，否則會放過超 quick 價的候選。
+  const ceiling = ceilingFor(config, effectiveTier);
   const priceOk = (candidate: Target): boolean => {
     // Part 9 L3：顯式條目（使用者自己寫的）永不被政策過濾——價格天花板也一樣。
     if (candidate.explicit) return true;

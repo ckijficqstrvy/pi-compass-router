@@ -1,7 +1,7 @@
 // policy/filter.ts — L2 政策過濾：deny / allowProviders / prefer / 價格帶天花板
 //（SPEC Part 9 四層政策、Part 5 Stage 3）。
 import { PROFILE_CEILINGS, type CompassConfig, type Profile, type Target, type Tier } from "../schema.js";
-import { targetFromKey, targetKey } from "../target.js";
+import { targetKey } from "../target.js";
 
 /**
  * 某層的生效天花板（$\/M，`input+2×output`）：顯式 `ceilings[tier]` 覆寫
@@ -68,10 +68,16 @@ export function insertPrefer(chain: Target[], tier: string, config: CompassConfi
   const heads = config.prefer[tier as keyof CompassConfig["prefer"]];
   if (!heads || heads.length === 0) return chain;
 
-  // 2026-10-03（W3）：prefer 字串要與其他 key 用**同一個 codec** 解析。
-  // 原本一律塞 provider:""，導致 availability（resolveModel 需要 provider）
-  // 永遠丟棄 prefer head——「顯式勝出」實質失效。
-  const injected: Target[] = heads.map((model) => ({ ...targetFromKey(model), explicit: true }));
-  const injectedIds = new Set(injected.map((target) => targetKey(target)));
-  return [...injected, ...chain.filter((target) => !injectedIds.has(targetKey(target)))];
+  // 2026-10-03（W3，N2 修正）：prefer 條目是**裸 model id**——它常自帶 `/`
+  // （`xiaomi/mimo-v2.6-pro`、`openai/gpt-6-sol`），強拆 provider 會拆出不存在
+  // 的 provider，反而讓 head 再次被 availability 丟棄。這裡保持 provider:"",
+  // 由 `resolveModel` 以 registry **唯一 id 匹配**解析；必要時才退回 provider 拆解。
+  const injected: Target[] = heads.map((model) => ({ provider: "", model, explicit: true }));
+  // 去重：prefer 的裸 id 可能與鏈上 provider/model 指到同一模型（比對裸 id 與完整 key）。
+  const ids = new Set<string>();
+  for (const target of injected) {
+    ids.add(target.model);
+    ids.add(targetKey(target));
+  }
+  return [...injected, ...chain.filter((target) => !ids.has(target.model) && !ids.has(targetKey(target)))];
 }

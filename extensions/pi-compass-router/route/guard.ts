@@ -152,6 +152,9 @@ export function guard(
     state.cachePenaltyUsd !== undefined &&
     state.cachePenaltyUsd > config.cache.maxPenaltyUsd &&
     !bypass &&
+    // N1（2026-10-03 複審）：預算強制變更同樣豁免 cache 懲罰——「錢的約束優先」
+    // 與 deadband/cooldown 的豁免一致，否則 1 階 soft 降級在長 context 下會被擋回貴層。
+    !budgetForced &&
     // 2026-10-03 校準：cache penalty 只抑制「同層互換與降級」。
     // 明確的升級是路由器的目的，且固定 USD 上限會隨 context 變大而失效
     // （60k tokens 就會擋掉 $1/M 升級）——不讓一次性 cache 成本擋升級。

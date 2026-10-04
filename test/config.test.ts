@@ -344,9 +344,10 @@ test("prefer heads land first in the chain", () => {
   const temp = withTempConfig({ prefer: { quick: ["moonshotai/kimi-k3"] } });
   try {
     const { config } = loadConfig(NO_ENV, { filePath: temp.path });
-    // W3：prefer 用統一 codec 解析，provider/model 分開（不再是 provider:"" 的整串）。
+    // N2：prefer 保持裸 model id（可由 resolveModel 唯一匹配解析）。
     const head = config.routes.quick[0];
-    assert.equal(`${head.provider}/${head.model}`, "moonshotai/kimi-k3");
+    assert.equal(head.provider, "");
+    assert.equal(head.model, "moonshotai/kimi-k3");
     assert.equal(head.explicit, true);
   } finally {
     temp.cleanup();

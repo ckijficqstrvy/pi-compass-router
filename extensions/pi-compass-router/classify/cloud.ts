@@ -21,7 +21,10 @@ import type { CompassConfig } from "../schema.js";
 const ENDPOINT = "https://api.typesafe.ai/v1/systemone";
 
 /** 金鑰檔（Part 4.3：必須 0600，否則拒絕讀取）。 */
-const AUTH_FILE = join(homedir(), ".pi", "agent", "pi-typesafe", "auth.json");
+/** 金鑰檔路徑（呼叫時解析 HOME；與 state/config/decisions 的 lazy 政策一致）。 */
+function authFile(): string {
+  return join(homedir(), ".pi", "agent", "pi-typesafe", "auth.json");
+}
 
 /**
  * input token 單價（USD/M）。Part 4.3 要求「分類耗用計入帳本」但未定換算；
@@ -35,9 +38,9 @@ function resolveApiKey(env: Record<string, string | undefined> = process.env): s
   const fromEnv = env.TYPESAFE_API_KEY;
   if (fromEnv && fromEnv.length > 0) return fromEnv;
   try {
-    const mode = statSync(AUTH_FILE).mode & 0o777;
+    const mode = statSync(authFile()).mode & 0o777;
     if (mode !== 0o600) return undefined; // 權限過寬 → 拒絕讀取（Part 4.3）
-    const parsed: unknown = JSON.parse(readFileSync(AUTH_FILE, "utf8"));
+    const parsed: unknown = JSON.parse(readFileSync(authFile(), "utf8"));
     if (typeof parsed === "object" && parsed !== null) {
       const key = (parsed as Record<string, unknown>).apiKey;
       if (typeof key === "string" && key.length > 0) return key;

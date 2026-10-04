@@ -68,7 +68,9 @@ export function scoresFromHistory(records: readonly DecisionRecord[]): Record<st
     const p = pos.get(key) ?? 0;
     const n = neg.get(key) ?? 0;
     const c = chosen.get(key) ?? 0;
-    const positive = p + 0.5 * c;
+    // N5（複審）：chosen 是「路由器自己選的」，只是弱訊號——每位 0.2、最多計 2 次
+    //（上限 +0.4），避免零 feedback 的大量使用把某模型推到 0.9+。
+    const positive = p + Math.min(c, 2) * 0.2;
     out[key] = {
       score: 0.5 + (0.5 * (positive - n)) / (positive + n + 1),
       note: `history +${p}/-${n} · chosen ${c}`,

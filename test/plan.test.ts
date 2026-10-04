@@ -313,3 +313,53 @@ test("an explicit target is never filtered by the runtime price ceiling (Part 9 
   assert.equal(plan.unavailable, true, "non-explicit target is still price-filtered");
   assert.equal(kept.target?.model, "standard-model", "explicit target survives");
 });
+
+// ---------------------------------------------------------------------------
+// 複審 N1/N3 回歸
+// ---------------------------------------------------------------------------
+
+test("budget-forced downgrade is not blocked by the cache penalty (N1)", () => {
+  const config = configWith({
+    ceilings: { quick: null },
+    routes: {
+      quick: [{ provider: "openrouter", model: "cheap-x" }],
+      standard: [{ provider: "openrouter", model: "standard-model" }],
+      high: [],
+      premium: [],
+      xpremium: [],
+    },
+  });
+  // soft pressure 0.72：composed standard → budget 降 quick；currentTier high（降級路徑）。
+  // cache miss 0.2 > cap 0.05：若 cache penalty 不讓路，會被 held 回 high。
+  const plan = planTurn(
+    judgmentFor(1.9),
+    config,
+    snapshotWith({ currentTier: "high", todayUsd: 3.6, contextTokens: 100_000, currentCost: zeroCurrent }),
+    { isAvailable: () => true, costOf: () => hugeNext },
+  );
+  assert.equal(plan.target?.model, "cheap-x");
+  assert.equal(plan.guard?.outcome, "applied", "money beats cache cost, like deadband/cooldown");
+  assert.equal(plan.guard?.tier, "quick");
+});
+
+test("runtime price ceiling uses the effective (post-budget) tier (N3)", () => {
+  const config = configWith({
+    ceilings: { standard: null, quick: 0.001 },
+    routes: {
+      quick: [{ provider: "openrouter", model: "cheap-x" }],
+      standard: [{ provider: "openrouter", model: "standard-model" }],
+      high: [],
+      premium: [],
+      xpremium: [],
+    },
+  });
+  // hard pressure、demand 1.9 < 2.5 → effective quick；cheap-x registry blended 15
+  // 遠超 quick ceiling 0.001 → 必須被擋（先前用 standard 的 null ceiling 會放行）。
+  const plan = planTurn(
+    judgmentFor(1.9),
+    config,
+    snapshotWith({ currentTier: null, todayUsd: 4.6 }),
+    { isAvailable: () => true, costOf: () => ({ input: 5, output: 5, cacheRead: 0, cacheWrite: 0 }) },
+  );
+  assert.equal(plan.unavailable, true, "over-quick-ceiling candidate is rejected");
+});

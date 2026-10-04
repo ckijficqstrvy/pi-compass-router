@@ -203,7 +203,7 @@ pi-compass 是一個 pi 擴充，在每一輪對話**開始之前**判斷該用�
 | `ceilings` | `Partial<Record<Tier, number｜null>>` | `{}` | 每層價格上限覆寫（$/M，`input+2×output`） |
 | `deny` | `string[]` | `[]` | glob，從**衍生**鏈移除 |
 | `allowProviders` | `string[]` | `[]` | 非空 → 衍生鏈只留這些 provider |
-| `prefer` | `Partial<Record<Tier, string[]>>` | `{}` | 插入鏈首，**絕不被過濾** |
+| `prefer` | `Partial<Record<Tier, string[]>>` | `{}` | 插入鏈首，**絕不被過濾**。條目是**裸 model id**（可含 `/`，如 `xiaomi/mimo-v2.6-pro`）：解析先找 registry 唯一同 id，再退回 `provider/model` 拆解（2026-10-03 N2） |
 | `autoRoutes` | boolean | `true` | 用 model-facts 推導未寫的層級 |
 | `modelPick` | `off｜menu` | `off` | `menu` → 分類器多答一題選具體模型 |
 | `allowUnratedPicks` | boolean | `false` | 允許未評分模型中選 |
@@ -715,6 +715,11 @@ mode 決定 Stage 5 動作：
 > `taskKinds.floor` 與 `kindMinimumTier` **不再拉高 demand**（因此 thinking 階梯
 > 與 hard-ratio 的 `demand ≥ 2.5` 特赦都不繼承）；`kindMinimumTier` 仍作為 tier
 > 下限但**封頂在 standard**（安全中間值，只降不升）。
+>
+> **N7（複審後明文化）**：低信心只撤回 **kind 衍生**的量；由分類器**分數**
+> （complexity／capability）算出的 raw demand 仍有效——可能出現
+> 「tier standard（信心封頂）但 thinking high（分數階梯）」，這是刻意保留的
+> 雙訊號語意，entry 會同時顯示 demand 與 tier 供判讀。
 
 ---
 

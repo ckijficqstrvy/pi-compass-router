@@ -188,13 +188,14 @@ test("no policy configured leaves the chain untouched", () => {
 test("insertPrefer prepends heads, marks them explicit, and dedupes", () => {
   const cfg = config({ prefer: { quick: ["moonshotai/kimi-k3"] } });
   const out = insertPrefer(targets, "quick", cfg);
-  // W3：prefer 與其他 key 共用 codec → provider/model 正確拆開，availability 才找得到。
-  assert.equal(out[0].provider, "moonshotai");
-  assert.equal(out[0].model, "kimi-k3");
+  // N2：prefer 是**裸 model id**（可含 `/`）——不強拆 provider，交由 resolveModel
+  // 以 registry 唯一匹配解析；強拆會把 `xiaomi/...` 拆成不存在的 provider。
+  assert.equal(out[0].provider, "");
+  assert.equal(out[0].model, "moonshotai/kimi-k3");
   assert.equal(out[0].explicit, true, "prefer heads are explicit");
   assert.equal(out.length, 3 + 1);
 
-  // 同一個真實模型（provider+model 分開）→ 去重。
+  // 同一個真實模型（鏈上為 provider/model，prefer 為裸 id）→ 去重。
   const duped = insertPrefer([{ provider: "moonshotai", model: "kimi-k3" }], "quick", cfg);
   assert.equal(duped.length, 1, "the pre-existing entry is replaced, not duplicated");
 });
@@ -206,7 +207,7 @@ test("insertPrefer is a no-op for a tier with no preference", () => {
 test("a prefer head survives a deny that matches it (explicit beats policy)", () => {
   const cfg = config({ prefer: { quick: ["anthropic/claude-opus-latest"] }, deny: ["*claude-opus*"] });
   const out = insertPrefer(filterChain(targets, cfg), "quick", cfg);
-  assert.equal(`${out[0].provider}/${out[0].model}`, "anthropic/claude-opus-latest", "prefer is injected after filtering and never filtered");
+  assert.equal(out[0].model, "anthropic/claude-opus-latest", "prefer is injected after filtering and never filtered");
 });
 
 // ---------------------------------------------------------------------------

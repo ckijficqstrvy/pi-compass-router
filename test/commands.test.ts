@@ -12,6 +12,9 @@ import { join } from "node:path";
 interface BootOptions {
   mode?: "auto" | "confirm" | "notify";
   confirm?: boolean;
+  hasUI?: boolean;
+  /** 設了就在 config 寫 prefer.standard=[id]，測 prefer 解析。 */
+  prefer?: string;
 }
 
 /** 建一個獨立的 HOME（config 檔在裡面），再動態載入擴充——行程層級隔離。 */
@@ -34,6 +37,7 @@ async function boot(options: BootOptions = {}) {
         xpremium: [],
       },
       kindModels: {},
+      ...(options.prefer ? { prefer: { standard: [options.prefer] } } : {}),
     }),
   );
   process.env.HOME = home;
@@ -44,10 +48,14 @@ async function boot(options: BootOptions = {}) {
   const notices: Array<{ type: string; message: string }> = [];
   const appends: unknown[] = [];
   const setModels: string[] = [];
+  const thinkings: string[] = [];
+  const tools: Record<string, { execute: (id: string, params: unknown) => Promise<{ content: Array<{ text?: string }> }> }> = {};
 
   const models: Record<string, unknown> = {
     "openrouter/m0": { provider: "openrouter", id: "m0", cost: { input: 0.1, output: 0.1, cacheRead: 0, cacheWrite: 0 } },
     "openrouter/m1": { provider: "openrouter", id: "m1", cost: { input: 1, output: 1, cacheRead: 0, cacheWrite: 0 } },
+    // N2：模型 id 自帶 `/`（真實案例：xiaomi/mimo-v2.6-pro）；prefer 用裸 id 指到它。
+    "openrouter/xiaomi/mimo": { provider: "openrouter", id: "xiaomi/mimo", cost: { input: 2, output: 2, cacheRead: 0, cacheWrite: 0 } },
   };
 
   const pi = {
@@ -58,7 +66,9 @@ async function boot(options: BootOptions = {}) {
     registerCommand(name: string, def: { handler: (args: string, ctx: unknown) => Promise<unknown> }) {
       commands[name] = def;
     },
-    registerTool() {},
+    registerTool(def: { name: string; execute: (id: string, params: unknown) => Promise<{ content: Array<{ text?: string }> }> }) {
+      tools[def.name] = def;
+    },
     registerEntryRenderer() {},
     appendEntry(_type: string, data: unknown) {
       appends.push(data);
@@ -67,9 +77,11 @@ async function boot(options: BootOptions = {}) {
       setModels.push(`${model.provider}/${model.id}`);
       return true;
     },
-    setThinkingLevel() {},
+    setThinkingLevel(level: string) {
+      thinkings.push(level);
+    },
     getThinkingLevel() {
-      return "off";
+      return thinkings[thinkings.length - 1] ?? "off";
     },
   };
 
@@ -81,7 +93,7 @@ async function boot(options: BootOptions = {}) {
       getAll: () => Object.values(models),
     },
     getContextUsage: () => ({ tokens: 1000, contextWindow: 200000, percent: 1 }),
-    hasUI: true,
+    hasUI: options.hasUI ?? true,
     mode: "tui",
     signal: new AbortController().signal,
     cwd: process.cwd(),
@@ -102,6 +114,8 @@ async function boot(options: BootOptions = {}) {
     notices,
     appends,
     setModels,
+    thinkings,
+    tools,
     home,
     cleanup: () => rmSync(home, { recursive: true, force: true }),
   };
@@ -231,6 +245,57 @@ test("/compass-route classifies the given text (and rejects empty input) (W12)",
     notices.length = 0;
     await commands["compass-route"].handler("   ", ctx);
     assert.match(notices[0]?.message ?? "", /expected some text/);
+  } finally {
+    cleanup();
+  }
+});
+
+test("prefer with a slash-containing bare model id resolves and gets picked (N2/T2)", async () => {
+  const { handlers, ctx, setModels, cleanup } = await boot({ prefer: "xiaomi/mimo" });
+  try {
+    await handlers["before_agent_start"]({ prompt: "implement a streaming parser with tests" }, ctx);
+    assert.deepEqual(setModels, ["openrouter/xiaomi/mimo"], "the prefer head is actually selected");
+  } finally {
+    cleanup();
+  }
+});
+
+test("a short prompt takes the continuation path through Stage 5 (T3)", async () => {
+  const { handlers, ctx, appends, setModels, thinkings, cleanup } = await boot();
+  try {
+    await handlers["before_agent_start"]({ prompt: "ok" }, ctx);
+    assert.equal(setModels.length, 0, "continuation never switches");
+    assert.equal(appends.length, 1);
+    const entry = appends[0] as { reason?: string; symbol?: string };
+    assert.equal(entry.reason, "continuation");
+    assert.equal(entry.symbol, "×");
+    assert.equal(thinkings[thinkings.length - 1], "low", "skipped applies thinking (W10)");
+  } finally {
+    cleanup();
+  }
+});
+
+test("the compass_route tool classifies its text params (T4)", async () => {
+  const { tools, cleanup } = await boot();
+  try {
+    const result = await tools["compass_route"].execute("id", { text: "refactor this module" });
+    const text = result.content[0]?.text ?? "";
+    assert.match(text, /kind (fallback|\w+) · demand [\d.]+ · tier (quick|standard|high|premium|xpremium)/, text);
+  } finally {
+    cleanup();
+  }
+});
+
+test("confirm without UI is recorded as skipped, never as applied (N4)", async () => {
+  const { handlers, ctx, appends, setModels, home, cleanup } = await boot({ mode: "confirm", hasUI: false });
+  try {
+    await handlers["before_agent_start"]({ prompt: "implement a streaming parser with tests" }, ctx);
+    assert.equal(setModels.length, 0);
+    assert.equal(appends.length, 1);
+    const entry = appends[0] as { reason?: string };
+    assert.match(String(entry.reason), /confirm required UI/);
+    const routes = decisionLines(home).filter((r) => r.type === "route");
+    assert.equal(routes[0]?.outcome, "skipped", "no phantom applied record");
   } finally {
     cleanup();
   }

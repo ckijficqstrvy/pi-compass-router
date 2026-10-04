@@ -82,10 +82,21 @@ function costRatesOf(model: ReturnType<typeof resolveModel>): CostRates | null {
 /** 解析 Target → pi Model；找不到回 undefined（可用性，Stage 4 實作契約第 1 點）。 */
 function resolveModel(ctx: ExtensionContext, target: Target): ReturnType<ExtensionContext["modelRegistry"]["find"]> {
   if (target.provider) return ctx.modelRegistry.find(target.provider, target.model);
-  // provider 為空（prefer 注入或裸 id）：在 registry 找**唯一**同 id 的模型；
-  // 多個 provider 都有同 id → 歧義，拒絕而不是猜（2026-10-03 W3）。
-  const matches = ctx.modelRegistry.getAll().filter((model) => model.id === target.model);
-  return matches.length === 1 ? matches[0] : undefined;
+  // provider 為空（prefer 注入或裸 id）：
+  // 1. registry **唯一**同 id → 用它（這是 prefer 的主要路徑，id 自帶 `/` 也正確）
+  // 2. 否則嘗試把字串當 `provider/model` 拆（兩人寫法都支援）
+  // 3. 多個 provider 同 id（歧義）→ 拒絕而不是猜（2026-10-03 W3/N2）
+  const all = ctx.modelRegistry.getAll();
+  const exact = all.filter((model) => model.id === target.model);
+  if (exact.length === 1) return exact[0];
+  if (exact.length === 0) {
+    const slash = target.model.indexOf("/");
+    if (slash > 0) {
+      const split = ctx.modelRegistry.find(target.model.slice(0, slash), target.model.slice(slash + 1));
+      if (split) return split;
+    }
+  }
+  return undefined;
 }
 
 /** 給 classify 的種類集合（`taskKinds` 的 keys）。 */
@@ -326,6 +337,20 @@ async function routeTurn(
       outcomeKind = "cancelled";
       appliedNow = false;
     }
+  } else if (outcome.needsConfirm) {
+    // N4（複審）：confirm 模式但沒有 UI 可問——不切、也不可假記 applied（會污染
+    // 決策日誌與 suggest 校準），記一筆 skipped。
+    writeEntry(pi, {
+      symbol: "×",
+      tier: result.tier,
+      target: available,
+      reason: "confirm required UI; not applied",
+      notes: plan.notes,
+      demand: plan.composed.demand,
+    });
+    symbol = "×";
+    outcomeKind = "skipped";
+    appliedNow = false;
   }
   if (appliedNow) {
     state.switches += 1;

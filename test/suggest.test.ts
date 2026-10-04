@@ -51,7 +51,7 @@ test("an empty scoresFile falls back to decision history; no history → []", as
   assert.deepEqual(result, []);
 });
 
-test("scoresFromHistory: reverted-from loses, moved-to gains, chosen stays neutral", () => {
+test("scoresFromHistory: reverted-from loses, moved-to gains, chosen is a weak positive", () => {
   const records = [
     { type: "route", model: "p/chosen", symbol: "→", outcome: "applied" },
     { type: "feedback", feedback: "revert", from: "p/bad", to: "p/good" },
