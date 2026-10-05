@@ -347,3 +347,29 @@ test("confirm without UI is recorded as skipped, never as applied (N4)", async (
     cleanup();
   }
 });
+
+test("/compass log shows recent decisions and the aggregate summary (D1/D2)", async () => {
+  const { commands, handlers, ctx, notices, cleanup } = await boot({ mode: "auto" });
+  try {
+    await handlers["before_agent_start"]({ prompt: "implement a streaming parser with tests" }, ctx);
+    notices.length = 0;
+    await commands["compass"].handler("log", ctx);
+    const text = notices.map((n) => n.message).join("\n");
+    assert.match(text, /compass log · 最近/);
+    assert.match(text, /統計 applied 1/);
+    assert.match(text, /openrouter\/m1/);
+  } finally {
+    cleanup();
+  }
+});
+
+test("/compass log with no records explains itself instead of erroring", async () => {
+  const { commands, ctx, notices, cleanup } = await boot();
+  try {
+    notices.length = 0;
+    await commands["compass"].handler("log", ctx);
+    assert.match(notices[0]?.message ?? "", /沒有紀錄/);
+  } finally {
+    cleanup();
+  }
+});

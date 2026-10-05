@@ -1493,3 +1493,19 @@ push 與 pull_request 皆觸發。
 | 9 | entry 補齊 `kind`/`scoring`/`budgetPressure`/`picked`/`thinking.judged`（`display.fields` 的 budget 不再是死旋鈕） | Part 5 Stage 5、Part 10.4 |
 | 10 | `freeOnly` 回退到 `freePool`/付費層級時寫入 notes；`compact` dry-run 標示未檢查可用性/預算 | Part 5 Stage 3、Part 10.1 |
 | 11 | `conversationText` 收 `readonly unknown[]`，移除 `index.ts` 的 `as never` | Part 11 相依 |
+---
+
+## Part 15 — 2026-10-05 成本／紀錄／健康／可觀測性（覆核第二輪）
+
+使用者方向（2026-10-05）：品質判定交給決策模型，系統負責**成本、紀錄、健康、
+可觀測性**；不自建分類評估集。本輪只做後四者中非評估類的缺口。
+
+| # | 修正 | 對應條文 |
+| --- | --- | --- |
+| 1 | 新增 `/compass log [n]`：檢視最近 n 筆（預設 10、上限 50）決策與聚合統計，不切換、不進 LLM | Part 10.1 |
+| 2 | 新增 `stats.ts`：`summarizeDecisions` 把 `decisions.jsonl` 聚合成 applied/held/skipped/cancelled/apply failed、revert/manual-override、kind／tier／model 排行與 cache miss 平均（90 天窗） | Part 8、Part 10.1 |
+| 3 | 健康檔 `health.json` 寫入改用與帳本共用的跨行程鎖 + 原子寫（`lock.ts`；budget 同步改用同一支） | Part 8.4 |
+| 4 | 全部候選都在冷卻時，skipped entry 明確寫 `all candidates cooling down; keeping current model`，並以 UI 警告說明 | Part 8.4、Part 5 Stage 5 |
+| 5 | `decisionWithinDays` 抽到 `decisions.ts`，`suggest` 與 `stats` 共用同一視窗邏輯（移除重複） | Part 10.1 |
+
+未做（本輪明示排除）：分類準確度評估集、npm 發佈。

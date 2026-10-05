@@ -55,6 +55,18 @@ export function appendDecision(record: DecisionRecord, file: string = decisionsF
   }
 }
 
+/**
+ * 記錄是否落在最近 `days` 天內（`ts` 缺失或無法解析時保留，fail-open）。
+ * 供 `suggest` 與 `stats` 共用，避免兩處各寫一份視窗邏輯。
+ */
+export function decisionWithinDays(record: unknown, now: number, days: number): boolean {
+  const ts = (record as { ts?: unknown } | null | undefined)?.ts;
+  if (typeof ts !== "string") return true;
+  const parsed = Date.parse(ts);
+  if (!Number.isFinite(parsed)) return true;
+  return now - parsed <= days * 24 * 60 * 60 * 1000;
+}
+
 /** 讀決策日誌（best-effort）：檔案不存在或個別行壞掉都跳過，永不 throw。 */
 export function readDecisions(file: string = decisionsFile()): DecisionRecord[] {
   let raw: string;

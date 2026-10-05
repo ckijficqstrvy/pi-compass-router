@@ -2,10 +2,11 @@
 //
 // 上游版本（108 行）列為禁讀來源（Part 0.2），本檔依 Part 8 規格重寫。
 // 行為定義只有兩條：壓力公式與記帳到固定路徑。
-import { mkdirSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 
+import { acquireLock, releaseLock } from "./lock.js";
 import type { CompassConfig } from "./schema.js";
 
 /** 記帳來源的花費快照（state.json）。 */
@@ -92,41 +93,6 @@ function writeLedger(ledger: LedgerFile, stateFile: string): void {
     renameSync(tmp, stateFile);
   } catch {
     // 記帳是 best-effort：寫不進去也不打斷回合（Part 8：上限是政策不是硬擋）。
-  }
-}
-
-/** 跨行程鎖的目錄；持有者寫入前建立，寫完删除。 */
-const LOCK_STALE_MS = 2000;
-
-/**
- * 以 `mkdir`（原子操作）取得跨行程鎖；拿不到就回 false。
- * 超過 `LOCK_STALE_MS` 的鎖視為持有者已死，搶一次。
- */
-function acquireLock(stateFile: string): boolean {
-  const lockDir = `${stateFile}.lock`;
-  try {
-    mkdirSync(lockDir);
-    return true;
-  } catch {
-    try {
-      const age = Date.now() - statSync(lockDir).mtimeMs;
-      if (age > LOCK_STALE_MS) {
-        rmSync(lockDir, { recursive: true, force: true });
-        mkdirSync(lockDir);
-        return true;
-      }
-    } catch {
-      // 鎖目錄剛被释放或無法讀取——就當沒拿到（best-effort）
-    }
-    return false;
-  }
-}
-
-function releaseLock(stateFile: string): void {
-  try {
-    rmSync(`${stateFile}.lock`, { recursive: true, force: true });
-  } catch {
-    // 解锁失敗不影響回合
   }
 }
 

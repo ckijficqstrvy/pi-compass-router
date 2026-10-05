@@ -159,6 +159,31 @@ test("a quota failure cools the whole provider", async () => {
   }
 });
 
+test("when every candidate is cooling down, the turn is skipped with an explicit reason (B3)", async () => {
+  const { handlers, ctx, notices, appends, setModels, cleanup } = await boot();
+  try {
+    handlers["message_end"](failedTurn("openrouter", "m2", "HTTP 429 Too Many Requests"), ctx);
+    handlers["message_end"](failedTurn("openrouter", "m1", "HTTP 429 Too Many Requests"), ctx);
+
+    setModels.length = 0;
+    appends.length = 0;
+    notices.length = 0;
+    await handlers["before_agent_start"]({ prompt: "implement a resilient rate limiter in typescript" }, ctx);
+
+    assert.deepEqual(setModels, [], "no model is switched to while everything is cooling");
+    assert.ok(
+      appends.some((entry) => String(entry.reason ?? "").includes("all candidates cooling down")),
+      "the skipped entry states that every candidate is cooling down",
+    );
+    assert.ok(
+      notices.some((n) => n.type === "warning" && n.message.includes("every candidate is cooling down")),
+      "the UI explains why nothing was switched",
+    );
+  } finally {
+    cleanup();
+  }
+});
+
 test("a successful turn clears the cooldown and the model is routable again", async () => {
   const { handlers, ctx, setModels, cleanup } = await boot();
   try {

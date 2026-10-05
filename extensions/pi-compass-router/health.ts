@@ -13,9 +13,11 @@
 //
 // 路由端只在 `deps.isAvailable` 查 `coolingReason()`，因此 `planTurn`
 // 維持純函式，不需改簽名。
-import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
+
+import { acquireLock, releaseLock } from "./lock.js";
 
 /** 可避開的錯誤類別。`context_overflow` 刻意不在其中（見檔頭）。 */
 export type ModelErrorClass = "rate_limit" | "quota" | "auth" | "server" | "timeout";
@@ -220,12 +222,20 @@ export function loadHealth(file: string = healthFile(), now = Date.now()): Model
   return new ModelHealth(valid);
 }
 
-/** 寫入健康狀態檔（best-effort、0600）。失敗不影響回合。 */
+/**
+ * 寫入健康狀態檔（best-effort、0600）。失敗不影響回合。
+ * 與帳本同一種跨行程鎖 + 原子寫，避免兩個 session 並寫交錯出半個 JSON。
+ */
 export function saveHealth(health: ModelHealth, file: string = healthFile()): void {
+  const locked = acquireLock(file);
   try {
     mkdirSync(dirname(file), { recursive: true });
-    writeFileSync(file, `${JSON.stringify({ entries: health.toJSON() }, null, 2)}\n`, { mode: 0o600 });
+    const tmp = `${file}.tmp-${process.pid}`;
+    writeFileSync(tmp, `${JSON.stringify({ entries: health.toJSON() }, null, 2)}\n`, { mode: 0o600 });
+    renameSync(tmp, file);
   } catch {
     // best-effort：寫不進去也不能打斷回合。
+  } finally {
+    if (locked) releaseLock(file);
   }
 }

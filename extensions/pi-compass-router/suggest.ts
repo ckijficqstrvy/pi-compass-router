@@ -1,7 +1,7 @@
 // suggest.ts — /compass suggest：從本地分數檔**或決策日誌**提議路由，不切換
 //（SPEC Part 10.1「分數檔格式」節、移植 #12；決策日誌自動校準 2026-10-03）。
 import { readFileSync } from "node:fs";
-import { readDecisions, type DecisionRecord } from "./decisions.js";
+import { decisionWithinDays, readDecisions, type DecisionRecord } from "./decisions.js";
 import { MODEL_FACTS, factsValid, factFor } from "./policy/facts.js";
 import { TIERS, TIER_CAPABILITY_FLOOR, type CompassConfig, type Target, type Tier } from "./schema.js";
 import { selectTargets } from "./route/select.js";
@@ -45,16 +45,8 @@ function isRecord(value: unknown): value is Record<string, unknown> {
  * `score = 0.5 + 0.5 × (pos + 0.5×chosen − neg) / (pos + 0.5×chosen + neg + 1)`
  * ——落在 (0,1)；完全沒有事件的模型不會出現在表裡。
  */
-/** 只採計最近的歷史；`ts` 缺失或無法解析時保留（fail-open）。 */
+/** 只採計最近的歷史（`ts` 缺失或無法解析時保留，fail-open）。 */
 const HISTORY_WINDOW_DAYS = 90;
-
-function withinHistoryWindow(record: DecisionRecord, now: number): boolean {
-  const ts = (record as { ts?: unknown }).ts;
-  if (typeof ts !== "string") return true;
-  const parsed = Date.parse(ts);
-  if (!Number.isFinite(parsed)) return true;
-  return now - parsed <= HISTORY_WINDOW_DAYS * 24 * 60 * 60 * 1000;
-}
 
 export function scoresFromHistory(
   records: readonly DecisionRecord[],
@@ -68,7 +60,7 @@ export function scoresFromHistory(
     map.set(key, (map.get(key) ?? 0) + 1);
   };
   for (const record of records) {
-    if (!withinHistoryWindow(record, now)) continue;
+    if (!decisionWithinDays(record, now, HISTORY_WINDOW_DAYS)) continue;
     if (record.type === "route") {
       // Only a real switch means the model was chosen; `held` also covers
       // deadband/cooldown/cache holds where the router kept the current model.

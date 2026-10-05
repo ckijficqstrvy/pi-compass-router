@@ -12,7 +12,8 @@ import { compose } from "./route/compose.js";
 import { selectTargets, targetKey, tierOfModel } from "./route/select.js";
 import { applyRoute, type ApplyHooks } from "./route/apply.js";
 import { runFactsRefresh } from "./ui/facts-refresh.js";
-import { appendDecision } from "./decisions.js";
+import { appendDecision, readDecisions } from "./decisions.js";
+import { formatCounts, summarizeDecisions } from "./stats.js";
 import {
   classifyModelError,
   coolingReason,
@@ -284,6 +285,9 @@ async function routeTurn(
 
   if (plan.unavailable || !plan.target || !plan.guard) {
     const skippedHooks = buildHooks(pi, ctx);
+    // B3（2026-10-05）：若不可用是**健康冷卻**造成（avoided 非空），講清楚是
+    // 「全部候選都在冷卻、沿用當前模型」，不要一律寫 no route available。
+    const skipReason = avoided.length > 0 ? "all candidates cooling down; keeping current model" : "no route available";
     await applyRoute(
       {
         outcome: "skipped",
@@ -291,11 +295,17 @@ async function routeTurn(
         thinking: plan.composed.thinking,
         mode: config.mode,
         tier: plan.composed.tier,
-        skipReason: "no route available",
+        skipReason,
         notes: entryNotes,
       },
       skippedHooks,
     );
+    if (avoided.length > 0 && ctx.hasUI) {
+      ctx.ui.notify(
+        `compass: every candidate is cooling down (${[...new Set(avoided)].join("; ")}); keeping the current model`,
+        "warning",
+      );
+    }
     if (config.decisionLog) {
       appendDecision({
         type: "route",
@@ -605,7 +615,7 @@ export default function compass(pi: ExtensionAPI): void {
 function registerCommands(pi: ExtensionAPI, state: SessionState): void {
   const descLang = state.config.display.language;
   pi.registerCommand("compass", {
-    description: tl(descLang, "compass 狀態 / on|off / mode / budget / why / revert / suggest / refresh-facts"),
+    description: tl(descLang, "compass 狀態 / on|off / mode / budget / why / log / revert / suggest / refresh-facts"),
     handler: async (args, ctx) => {
       const [sub, ...rest] = args.trim().split(/\s+/);
       switch (sub) {
@@ -635,6 +645,8 @@ function registerCommands(pi: ExtensionAPI, state: SessionState): void {
         }
         case "why":
           return showStatus(ctx, state, true);
+        case "log":
+          return showLog(ctx, state, rest[0]);
         case "revert": {
           const previous = state.previousModel;
           if (!previous) return ctx.ui.notify("nothing to revert", "info");
@@ -771,6 +783,47 @@ async function showStatus(ctx: ExtensionContext, state: SessionState, why = fals
     } else {
       lines.push("last: (none this session)");
     }
+  }
+  ctx.ui.notify(lines.join("\n"), "info");
+}
+
+/**
+ * `/compass log [n]`：檢視最近決策與聚合統計（純本地檔、不切換、不進 LLM）。
+ * D1/D2（2026-10-05）：先前 decisions.jsonl 只有 suggest 在消費，人看不到。
+ */
+function showLog(ctx: ExtensionContext, state: SessionState, arg: string | undefined): void {
+  const lang = state.config.display.language;
+  const records = readDecisions();
+  if (records.length === 0) {
+    ctx.ui.notify(tl(lang, "compass log：沒有紀錄（decisionLog 可能已關閉）"), "info");
+    return;
+  }
+  const requested = Number.parseInt(arg ?? "", 10);
+  const limit = Number.isFinite(requested) && requested > 0 ? Math.min(requested, 50) : 10;
+  const stats = summarizeDecisions(records);
+  const clip = (text: string): string => (text.length > 200 ? `${text.slice(0, 199)}…` : text);
+  const lines: string[] = [tr(lang)`compass log · 最近 ${Math.min(limit, records.length)} 筆 / 共 ${records.length}`];
+  for (const record of records.slice(-limit).reverse()) {
+    if (record.type === "feedback") {
+      lines.push(clip(tr(lang)`回饋 ${record.feedback} ${record.from ?? "-"} → ${record.to ?? "-"}`));
+      continue;
+    }
+    const conf = record.kindConfidence === undefined ? "" : ` ${Math.round(record.kindConfidence * 100)}%`;
+    lines.push(
+      clip(`${record.symbol ?? "?"} ${record.tier ?? "-"} ${record.model ?? "-"} · ${record.kind ?? "?"}${conf} · ${record.outcome ?? "-"}`),
+    );
+  }
+  lines.push(
+    tr(lang)`統計 applied ${stats.applied} · held ${stats.held} · skipped ${stats.skipped} · cancelled ${stats.cancelled} · revert ${stats.revert} · manual ${stats.manualOverride}`,
+  );
+  const kinds = formatCounts(stats.kinds);
+  if (kinds) lines.push(clip(tr(lang)`種類 ${kinds}`));
+  const tiers = formatCounts(stats.tiers);
+  if (tiers) lines.push(clip(tr(lang)`層級 ${tiers}`));
+  const models = formatCounts(stats.models);
+  if (models) lines.push(clip(tr(lang)`模型 ${models}`));
+  if (stats.cacheMissAvgUsd !== null) {
+    lines.push(tr(lang)`cache miss 平均 ≈ $${stats.cacheMissAvgUsd.toFixed(3)}（${stats.cacheMissCount} 筆）`);
   }
   ctx.ui.notify(lines.join("\n"), "info");
 }

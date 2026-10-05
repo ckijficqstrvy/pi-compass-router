@@ -283,6 +283,17 @@ export const EN: Record<string, string> = {
   // ---- 通知 / 一般訊息 ----
   "compass 狀態 / on|off / mode / budget / why / revert / suggest": "compass status / on|off / mode / budget / why / revert / suggest",
   "compass 狀態 / on|off / mode / budget / why / revert / suggest / refresh-facts": "compass status / on|off / mode / budget / why / revert / suggest / refresh-facts",
+  "compass 狀態 / on|off / mode / budget / why / log / revert / suggest / refresh-facts": "compass status / on|off / mode / budget / why / log / revert / suggest / refresh-facts",
+
+  // ---- /compass log（決策日誌檢視 + 聚合統計） ----
+  "compass log：沒有紀錄（decisionLog 可能已關閉）": "compass log: no records (decisionLog may be off)",
+  "compass log · 最近 ${} 筆 / 共 ${}": "compass log · last ${} of ${}",
+  "回饋 ${} ${} → ${}": "feedback ${} ${} → ${}",
+  "統計 applied ${} · held ${} · skipped ${} · cancelled ${} · revert ${} · manual ${}": "stats applied ${} · held ${} · skipped ${} · cancelled ${} · revert ${} · manual ${}",
+  "種類 ${}": "kinds ${}",
+  "層級 ${}": "tiers ${}",
+  "模型 ${}": "models ${}",
+  "cache miss 平均 ≈ $${}（${} 筆）": "cache miss avg ≈ $${} (${} turns)",
   "/compass-set 設定選單（寫 config.json + 時間戳備份）": "/compass-set settings menu (writes config.json with timestamped backup)",
   "/compass-route <text> 分類任意文字並顯示建議（不切換）": "/compass-route <text> classify any text and show the suggestion (no switch)",
   "沒有分類器（backend 未啟用）": "no classifier (backend not enabled)",
