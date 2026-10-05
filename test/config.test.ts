@@ -156,6 +156,31 @@ test("an unknown top-level key in config.json is dropped by name", () => {
   }
 });
 
+test("檔案裡殘留的頂層 null = 該鍵未設定：走預設、不噴警告（Part 3.4）", () => {
+  const temp = withTempConfig({ mode: "auto", suggest: null, profile: null, deny: null });
+  try {
+    const { config, warnings } = loadConfig(NO_ENV, { filePath: temp.path });
+    assert.deepStrictEqual(warnings, [], warnings.join(" | "));
+    assert.equal(config.mode, "auto", "非 null 的鍵照常生效");
+    assert.deepEqual(config.suggest, { scoresFile: "" });
+    assert.equal(config.profile, "balanced");
+    const baseline = loadConfig(NO_ENV, { filePath: "/nonexistent/config.json" }).config;
+    assert.deepEqual(config.deny, baseline.deny, "null = 回預設值，不是刪成空的");
+  } finally {
+    temp.cleanup();
+  }
+});
+
+test("頂層 null 的未知鍵仍被白名單擋下（容錯 ≠ 放行）", () => {
+  const temp = withTempConfig({ totallyMadeUp: null });
+  try {
+    const { warnings } = loadConfig(NO_ENV, { filePath: temp.path });
+    assert.ok(warnings.some((w) => w.includes('"totallyMadeUp"')), warnings.join(" | "));
+  } finally {
+    temp.cleanup();
+  }
+});
+
 test("budget.dailyUsd: null clears the cap, an omitted key keeps it", () => {
   const cleared = withTempConfig({ budget: { dailyUsd: null } });
   const kept = withTempConfig({ budget: { monthlyUsd: 42 } });

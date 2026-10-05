@@ -228,6 +228,11 @@ function applyFilePatch(
       warnings.push(`config.json: unknown key "${key}" dropped (not in the whitelist)`);
       continue;
     }
+    // 頂層 `null` = 「整鍵未設定」（Part 3.4 的刪除哨兵，validatePatchValue 對 null
+    // 一律放行）。舊版寫入層曾把 null 落成字面值殘留在 config.json 裡；語意上等同
+    // 該鍵不存在，故走預設值、不噴驗證警告（2026-10-05：殘留 null 不該每次啟動
+    // 都重印同一行警告）。
+    if (value === null) continue;
     switch (key) {
       case "enabled":
       case "useDefaultModels":

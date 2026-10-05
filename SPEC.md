@@ -1521,5 +1521,6 @@ pi-compass/
 | 9 | **走鐘修正**：`writeConfigPatch` 的頂層 `null` 現在真的**刪除該鍵**（先前落到 else 分支寫成字面 `"suggest": null`，使下次載入噴警告）；與 Part 3.4「null = 刪除」契約一致 | Part 3.4 |
 | 10 | 逐輪 `usage` 記錄：`message_end` 對每個 assistant message 寫 model/input/output/cacheRead/cacheWrite/costUsd/ok/tier/kind（非內容）；`stats` 聚合出實際總花費與 cost-by-kind/model | Part 8、Part 11 |
 | 11 | 持久 `health` 記錄：故障首次進入冷卻時寫 provider/model/klass/scope；`stats` 聚合出 failures-by-class | Part 8.4、Part 11 |
+| 12 | **載入容錯**：`config.json` 頂層殘留的 `null`（舊版寫入層落下的字面值）視為「該鍵未設定」→ 走預設、不噴警告；未知鍵即使為 `null` 仍被白名單擋下。防舊 session 寫回 `"suggest": null` 後每次啟動重印同一行警告 | Part 3.4 |
 
 未做/排除：分類準確度評估集、npm 發佈；健康冷卻秒數仍為內建常數（B2，待有實測需求再開放）。
