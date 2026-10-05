@@ -91,3 +91,24 @@ test("registryChain bounds unrated models so the tail is not a flood of free slu
   const chain = registryChain({ tier: "quick", config: configWith({ allowUnratedPicks: true }), routes: many, capability: new Map() });
   assert.equal(chain.length, 3, "default maxUnrated = 3");
 });
+
+test("a bounded preference reorders within the feasible set but cannot lift a model past a hard constraint", () => {
+  const liked = registryChain({
+    tier: "standard",
+    config: configWith(),
+    routes: ROUTES,
+    capability: CAP,
+    kind: "chat",
+    preference: (_p, model) => (model === "deepseek/deepseek-v4.1-flash" ? 5 : 0),
+  });
+  assert.equal(liked[0].model, "deepseek/deepseek-v4.1-flash", "the liked route is promoted");
+
+  const floored = registryChain({
+    tier: "standard",
+    config: configWith(),
+    routes: ROUTES,
+    capability: CAP,
+    preference: (_p, model) => (model === "xiaomi/mimo-v2.6-flash" ? 50 : 0),
+  });
+  assert.ok(!floored.some((t) => t.model === "xiaomi/mimo-v2.6-flash"), "capability 23 < floor 35 stays out");
+});

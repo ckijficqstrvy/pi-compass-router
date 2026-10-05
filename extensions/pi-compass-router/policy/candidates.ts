@@ -32,6 +32,10 @@ export interface RegistryChainInput {
   capability: ReadonlyMap<string, number>;
   /** 覆寫定價（測試用）；預設取 route 的健康 endpoint 中位數。 */
   priceOf?: (route: Route) => number | undefined;
+  /** 任務種類（偏好分可依 kind 分開）。 */
+  kind?: string;
+  /** 偏好加分（capability 尺度，呼叫端已夾範圍；S4）。只影響**排序**，不影響硬約束。 */
+  preference?: (provider: string, model: string, kind?: string) => number;
   /**
    * 未評分模型的上限（預設 3）。`allowUnratedPicks` 為真時未評分模型本來就會
    * 進候選（排最後）；但 registry 全體下可能有數百個未評分的免費模型，無限帶入
@@ -58,7 +62,7 @@ export function registryChain(input: RegistryChainInput): Target[] {
   const ceiling = ceilingFor(config, tier);
   const priced = priceOf ?? ((route: Route) => medianHealthyPrice(route.endpoints));
 
-  const scored: Array<{ target: Target; capability: number; cost: number }> = [];
+  const scored: Array<{ target: Target; effective: number; cost: number }> = [];
   const seen = new Set<string>();
   const maxUnrated = input.maxUnrated ?? 3;
   let unratedCount = 0;
@@ -81,11 +85,13 @@ export function registryChain(input: RegistryChainInput): Target[] {
     if (cost === undefined) continue;
     if (ceiling !== null && ceiling !== undefined && cost > ceiling) continue;
 
+    // 偏好只在**已通過硬約束**的候選間調整排序（S4）；不讓它把模型拉進可行集。
+    const bonus = input.preference?.(route.provider, route.model, input.kind) ?? 0;
     seen.add(key);
-    scored.push({ target, capability: cap ?? -1, cost });
+    scored.push({ target, effective: (cap ?? -1) + bonus, cost });
   }
 
-  scored.sort((a, b) => b.capability - a.capability || a.cost - b.cost);
+  scored.sort((a, b) => b.effective - a.effective || a.cost - b.cost);
   const limit = input.limit ?? 25;
   return scored.slice(0, limit).map((entry) => entry.target);
 }

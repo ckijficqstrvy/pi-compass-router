@@ -47,6 +47,7 @@ import {
   type Route,
 } from "./policy/routes.js";
 import { registryChain } from "./policy/candidates.js";
+import { learnPreferences, preferenceBonus, type PreferenceTable } from "./policy/preferences.js";
 import { cloudClassifierKeys, localCheckpoints, openRouterModelKeys } from "./ui/sources.js";
 import type { CompassConfig, Mode, Target, ThinkingLevel, Tier } from "./schema.js";
 
@@ -87,6 +88,8 @@ interface SessionState {
   registryRoutes?: Route[];
   /** S2：canonical → 主分數（intelligence）。 */
   registryCapability?: Map<string, number>;
+  /** S4：自 decisions.jsonl 學來的偏好（session 內快取）。 */
+  preferenceTable?: PreferenceTable;
 }
 
 /** 追蹤 session 狀態（工廠不啟動行程，狀態在 session_start 填）。 */
@@ -177,6 +180,12 @@ function loadEndpointCache(
   return out;
 }
 
+/** S4：偏好表（session 內快取；decisions.jsonl 的 feedback/usage 學來）。 */
+function preferencesFor(state: SessionState): PreferenceTable {
+  if (!state.preferenceTable) state.preferenceTable = learnPreferences(readDecisions());
+  return state.preferenceTable;
+}
+
 /**
  * S2：由 pi registry 建 route 表 + canonical 能力表（session 內快取）。
  * 只在 `selection: "registry"` 時被呼叫；bands 模式完全不碰。
@@ -210,6 +219,7 @@ function registryTablesFor(ctx: ExtensionContext, state: SessionState): { routes
 function depsFor(ctx: ExtensionContext, state: SessionState, avoided?: string[]): PlanDeps {
   const health = state.health;
   const tables = state.config.selection === "registry" ? registryTablesFor(ctx, state) : undefined;
+  const prefs = tables === undefined ? undefined : preferencesFor(state);
   return {
     isAvailable: (candidate) => {
       if (resolveModel(ctx, candidate) === undefined) return false;
@@ -224,10 +234,17 @@ function depsFor(ctx: ExtensionContext, state: SessionState, avoided?: string[])
     },
     costOf: (candidate) => costRatesOf(resolveModel(ctx, candidate)),
     registryChain:
-      tables === undefined
+      tables === undefined || prefs === undefined
         ? undefined
         : (tier, judgment) =>
-            registryChain({ tier, config: state.config, routes: tables.routes, capability: tables.capability }),
+            registryChain({
+              tier,
+              config: state.config,
+              routes: tables.routes,
+              capability: tables.capability,
+              kind: judgment?.kind,
+              preference: (provider, model, kind) => preferenceBonus(prefs, provider, model, kind),
+            }),
   };
 }
 
@@ -966,12 +983,19 @@ async function showSuggest(ctx: ExtensionContext, state: SessionState): Promise<
   try {
     // S2：registry 模式下讓 suggest 用同一份可行集歸帶，與實際路由一致。
     const tables = state.config.selection === "registry" ? registryTablesFor(ctx, state) : undefined;
+    const prefs = tables === undefined ? undefined : preferencesFor(state);
     const list = await suggest(state.config, undefined, {
       registryChain:
-        tables === undefined
+        tables === undefined || prefs === undefined
           ? undefined
           : (tier) =>
-              registryChain({ tier, config: state.config, routes: tables.routes, capability: tables.capability }),
+              registryChain({
+                tier,
+                config: state.config,
+                routes: tables.routes,
+                capability: tables.capability,
+                preference: (provider, model, kind) => preferenceBonus(prefs, provider, model, kind),
+              }),
     });
     if (list.length === 0) return ctx.ui.notify(tl(state.config.display.language, "沒有足夠的決策歷史或分數檔——先使用一段時間，或用 /compass-set ⑤ 指定分數檔"), "info");
     ctx.ui.notify(list.map((s) => `${s.tier} ${targetKey(s.target)} — ${s.reason}`).join("\n"), "info");

@@ -935,6 +935,13 @@ OpenRouter 上游；`medianHealthyPrice()` 供預估成本；`registryChain()` �
 行為不變。`refresh-facts` 另外快取 OpenRouter 各模型 endpoint 報價到
 `~/.pi/agent/pi-compass/openrouter-endpoints.json`。
 
+（S4，2026-10-05）`policy/preferences.ts`：偏好是**學來的、會衰減的**，不是 config。
+`learnPreferences()` 由 `decisions.jsonl` 的 `feedback`（manual-override：from 扣分/to 加分；
+revert：from 扣分）與 `usage.ok`（+0.1）建立 `provider/model × kind` 分數，
+`preferenceBonus()` 以 14 天半衰期衰減並夾在 ±5。`registryChain` 把它當
+everective = capability + bonus 的排序項；**硬約束（能力下限/價格天花板/政策/冷卻）
+先過濾，偏好不能把模型拉進可行集**。
+
 `refresh-facts`：`npm run refresh-facts`（`-- --dry-run` 預覽）；
 價格**OpenRouter 公開 API 優先，其次保留既存值，最後才是 pi catalogue**
 （取不到 API 價時**不拿 catalogue 快照覆蓋既存價**——否則價格會在兩者間來回跳、連帶讓 price-band 飄移）；
@@ -1560,5 +1567,6 @@ pi-compass/
 | 18 | **能力向量化**：`capability` 由 number 改為 `{intelligence, coding?, agentic?}`；未核對的維度省略（不猜）。band/門檻排序暫用 `primaryCapability()=intelligence`，行為不變 | Part 9 |
 | 19 | **canonical 身分 + route/endpoint（S1/S1b）**：新增 `policy/routes.ts`（`canonicalOf`/`bestEndpoint`/`capabilityByCanonical`/`buildRoutes`）；`facts` 加選配 `canonical`。能力是模型級、價格是 route 級；同一模型跨 provider 共用分數。`refresh-facts` 快取 OpenRouter endpoints（實測 v4.1-flash 30 上游，最便宜健康 $0.09/$0.18 vs 摘要 $0.3/$1.2） | Part 9 |
 | 20 | **registry 可行集（S2）**：`selection: bands｜registry`（預設 bands）＋ `policy/candidates.ts`。`registry` 由 pi registry 全體建可行集（政策/冷卻/能力下限/中位數價格天花板，能力降價升，上限 25 並去重），接 `selectTargets`/`planTurn`；無可行集時退回 bands | Part 3.1、Part 9 |
+| 21 | **衰減偏好（S4）**：`policy/preferences.ts` 從 `decisions.jsonl` 的 feedback（manual-override / revert）與 usage.ok 學**依 kind 分開**的偏好，半衰期 14 天、分數夾 ±3、加分夾 ±5。只當可行集**內排序**加分，不影響硬約束。解「愛用模型不想手設、新模型用完不用刪設定」 | Part 9 |
 
 未做/排除：分類準確度評估集、npm 發佈；健康冷卻秒數仍為內建常數（B2，待有實測需求再開放）。
