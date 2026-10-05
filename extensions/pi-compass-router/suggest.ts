@@ -101,6 +101,7 @@ export function scoresFromHistory(
 export function evaluateScores(
   scoresRaw: Record<string, ScoreEntry>,
   config: CompassConfig,
+  registryChain?: (tier: Tier) => Target[] | undefined,
 ): Suggestion[] {
   const out: Array<Suggestion & { score: number }> = [];
   for (const [key, value] of Object.entries(scoresRaw)) {
@@ -113,7 +114,7 @@ export function evaluateScores(
 
     let tier: Tier;
     if (value.tier === undefined) {
-      const derived = deriveTier(key, config);
+      const derived = deriveTier(key, config, registryChain);
       if (derived === undefined) continue; // unrated → 跳過
       tier = derived;
     } else if (typeof value.tier === "string" && isTier(value.tier)) {
@@ -152,13 +153,13 @@ export function evaluateScores(
 export async function suggest(
   config: CompassConfig,
   scoresFile?: string,
-  options: { decisionsFile?: string } = {},
+  options: { decisionsFile?: string; registryChain?: (tier: Tier) => Target[] | undefined } = {},
 ): Promise<Suggestion[]> {
   const path = scoresFile ?? config.suggest.scoresFile;
   if (path === "") {
     const records = readDecisions(options.decisionsFile);
     const scores = scoresFromHistory(records);
-    return evaluateScores(scores, config);
+    return evaluateScores(scores, config, options.registryChain);
   }
 
   let raw: string;
@@ -177,11 +178,11 @@ export async function suggest(
   if (!isRecord(parsed) || !isRecord(parsed.scores)) {
     throw new Error(`suggest: scores file ${path} must be an object with a "scores" map`);
   }
-  return evaluateScores(parsed.scores as Record<string, ScoreEntry>, config);
+  return evaluateScores(parsed.scores as Record<string, ScoreEntry>, config, options.registryChain);
 }
 
 /** key → Tier：用事實檔的 capability 與 profile 價格帶歸帶（經 Stage 3 選鏈）。 */
-function deriveTier(key: string, config: CompassConfig): Tier | undefined {
+function deriveTier(key: string, config: CompassConfig, registryChain?: (tier: Tier) => Target[] | undefined): Tier | undefined {
   if (!factsValid(MODEL_FACTS)) return undefined;
   const want = targetFromKey(key);
   const fact = factFor(want.provider, want.model);
@@ -191,7 +192,7 @@ function deriveTier(key: string, config: CompassConfig): Tier | undefined {
   for (let i = TIERS.length - 1; i >= 0; i -= 1) {
     const tier = TIERS[i];
     if (primaryCapability(fact.capability) < TIER_CAPABILITY_FLOOR[tier]) continue;
-    const { chain } = selectTargets(tier, undefined, config);
+    const { chain } = selectTargets(tier, undefined, config, { registryChain: registryChain?.(tier) });
     if (chain.some((target) => target.model === want.model && (!want.provider || target.provider === want.provider))) {
       return tier;
     }

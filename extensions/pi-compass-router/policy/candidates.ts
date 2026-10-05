@@ -33,6 +33,12 @@ export interface RegistryChainInput {
   /** 覆寫定價（測試用）；預設取 route 的健康 endpoint 中位數。 */
   priceOf?: (route: Route) => number | undefined;
   /**
+   * 未評分模型的上限（預設 3）。`allowUnratedPicks` 為真時未評分模型本來就會
+   * 進候選（排最後）；但 registry 全體下可能有數百個未評分的免費模型，無限帶入
+   * 會讓「評分模型全冷卻時」跳到隨機免費模型。給一個小上限。
+   */
+  maxUnrated?: number;
+  /**
    * 候選鏈上限（預設 25）。registry 全體可達數百條（尤其 `allowUnratedPicks` 下
    * 大量未評分免費模型），不設限會讓每回合的可用性查詢與 menu 爆掉。
    */
@@ -54,6 +60,8 @@ export function registryChain(input: RegistryChainInput): Target[] {
 
   const scored: Array<{ target: Target; capability: number; cost: number }> = [];
   const seen = new Set<string>();
+  const maxUnrated = input.maxUnrated ?? 3;
+  let unratedCount = 0;
   for (const route of routes) {
     const target: Target = { provider: route.provider, model: route.model };
     // registry 可能有同一 provider/id 的重複條目（實測 `openrouter/auto` 出現兩次）。
@@ -63,7 +71,8 @@ export function registryChain(input: RegistryChainInput): Target[] {
 
     const cap = capability.get(route.canonical);
     if (cap === undefined) {
-      if (!config.allowUnratedPicks) continue;
+      if (!config.allowUnratedPicks || unratedCount >= maxUnrated) continue;
+      unratedCount += 1;
     } else if (cap < floor) {
       continue;
     }

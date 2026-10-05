@@ -78,14 +78,16 @@ test("registryChain drops routes with no priceable endpoint", () => {
 });
 
 test("registryChain de-duplicates repeated registry slugs and caps the chain", () => {
-  const dup = route("openrouter", "dup/model", "openrouter/dup/model", [ep("x", 0, 0)]);
-  const many = Array.from({ length: 30 }, (_, i) => route("openrouter", `m/m${i}`, `m/m${i}`, [ep("x", 0, 0)]));
-  const chain = registryChain({
-    tier: "quick",
-    config: configWith({ allowUnratedPicks: true }),
-    routes: [dup, dup, ...many],
-    capability: new Map(),
-  });
+  const dup = route("openrouter", "dup/model", "c/dup", [ep("x", 0, 0)]);
+  const many = Array.from({ length: 30 }, (_, i) => route("openrouter", `m/m${i}`, `c/m${i}`, [ep("x", 0, 0)]));
+  const cap = new Map<string, number>([["c/dup", 99], ...many.map((_, i) => [`c/m${i}`, 50] as [string, number])]);
+  const chain = registryChain({ tier: "quick", config: configWith(), routes: [dup, dup, ...many], capability: cap });
   assert.equal(chain.length, 25, "the chain is capped to bound per-turn work");
   assert.equal(chain.filter((t) => t.model === "dup/model").length, 1, "repeated registry slugs collapse");
+});
+
+test("registryChain bounds unrated models so the tail is not a flood of free slugs", () => {
+  const many = Array.from({ length: 10 }, (_, i) => route("openrouter", `u/u${i}`, `u/u${i}`, [ep("x", 0, 0)]));
+  const chain = registryChain({ tier: "quick", config: configWith({ allowUnratedPicks: true }), routes: many, capability: new Map() });
+  assert.equal(chain.length, 3, "default maxUnrated = 3");
 });

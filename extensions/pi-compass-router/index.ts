@@ -964,7 +964,15 @@ function showLog(ctx: ExtensionContext, state: SessionState, arg: string | undef
 /** `/compass suggest`：分數檔提議（不切換，Part 10.1）。 */
 async function showSuggest(ctx: ExtensionContext, state: SessionState): Promise<void> {
   try {
-    const list = await suggest(state.config);
+    // S2：registry 模式下讓 suggest 用同一份可行集歸帶，與實際路由一致。
+    const tables = state.config.selection === "registry" ? registryTablesFor(ctx, state) : undefined;
+    const list = await suggest(state.config, undefined, {
+      registryChain:
+        tables === undefined
+          ? undefined
+          : (tier) =>
+              registryChain({ tier, config: state.config, routes: tables.routes, capability: tables.capability }),
+    });
     if (list.length === 0) return ctx.ui.notify(tl(state.config.display.language, "沒有足夠的決策歷史或分數檔——先使用一段時間，或用 /compass-set ⑤ 指定分數檔"), "info");
     ctx.ui.notify(list.map((s) => `${s.tier} ${targetKey(s.target)} — ${s.reason}`).join("\n"), "info");
   } catch (error) {
