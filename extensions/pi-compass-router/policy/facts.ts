@@ -25,6 +25,10 @@ export interface ModelFact {
   /** pi 的 catalogue 認得的可路由模型 id（別名亦可）。 */
   model: string;
   provider: string;
+  /** 能力是**模型**的屬性（canonical，provider 無關）：同一模型在不同 provider/別名
+   *  下共用一個身分與分數，才不會出現「只比較 openrouter 分數」。缺省時由
+   *  `canonicalOf()` 推導（openrouter 的 slug 已是 `maker/model`）。 */
+  canonical?: string;
   /** 能力快照（分數越高越強），人工核對。 */
   capability: number;
   /** 快照時點的目錄牌價，USD / 百萬 token。可選：缺價的模型不會被切帶。 */
@@ -62,6 +66,7 @@ export function factsValid(value: unknown): value is FactsFile {
       typeof m.model === "string" &&
       m.model.length > 0 &&
       typeof m.provider === "string" &&
+      (m.canonical === undefined || (typeof m.canonical === "string" && m.canonical.length > 0)) &&
       typeof m.capability === "number" &&
       Number.isFinite(m.capability) &&
       (m.price === undefined ||

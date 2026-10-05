@@ -173,6 +173,7 @@
     {
       "provider": "deepseek",
       "model": "deepseek-flash",
+      "canonical": "deepseek/deepseek-v4.1-flash",
       "capability": 39,
       "price": {
         "input": 0.3,
