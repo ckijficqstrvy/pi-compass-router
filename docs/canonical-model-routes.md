@@ -20,11 +20,13 @@
 > 不一致、覆蓋不全。把它們混成一個向量去比門檻＝拿不同尺度硬比，違反 facts 檔
 > 「never auto-guessed」。在有一致的分數來源（或自建 eval）前，S3 不應基於這些數字建置。
 >
-> **OR 上游選擇：已用 pi 層 `models.json` 做**。pi 的 `modelOverrides.<id>.openRouterRouting`
-> 可設 `sort/order/only/ignore/max_price/zdr`（`ProviderConfigSchema` 的
-> `modelOverrides` 不替換 provider 模型清單）。已對 facts 內的 17 個 openrouter model
-> 設 `sort: {by:"price"}`。**代價**：最便宜上游可能每輸不同 → 犧牲 prompt cache；
-> 若不划算應改用 `max_price`/`order` 而非 `sort: price`。
+> **OR 上游選擇：已用 pi 層 `models.json` 做，改用 `max_price` 上限（非 `sort: price`）**。
+> pi 的 `modelOverrides.<id>.openRouterRouting` 可設 `sort/order/only/ignore/max_price/zdr`，
+> 且**不替換 provider 模型清單**（實測仍列出 400 個 openrouter 模型）。已對 facts 內 17 個
+> openrouter model 設 `max_price = 2×facts 價`（USD/百萬 token，prompt/completion 分開）。
+> 理由：`sort: price` 會讓每輪可能換上游→破壞 prompt cache；改上限則保留預設路由與快取，
+> 只擋掉貴超過兩倍的上游。**風險**：若某 model 所有上游都超限可能回 404；只要任一上游在
+> 限內即正常。要完全不管成本可刪該檔，要固定上游可用 `order`。
 
 ## 1. 問題：三個不同的東西被擠在同一張表
 
