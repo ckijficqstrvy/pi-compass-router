@@ -373,3 +373,29 @@ test("/compass log with no records explains itself instead of erroring", async (
     cleanup();
   }
 });
+
+test("an assistant turn writes a per-turn usage record (non-content) (2026-10-05)", async () => {
+  const { handlers, home, cleanup } = await boot();
+  try {
+    handlers["message_end"]({
+      message: {
+        role: "assistant",
+        provider: "openrouter",
+        model: "m1",
+        stopReason: "stop",
+        usage: { input: 1000, output: 500, cacheRead: 100, cacheWrite: 0, cost: { total: 0.02 } },
+      },
+    });
+    const usage = decisionLines(home).filter((r) => r.type === "usage");
+    assert.equal(usage.length, 1, "exactly one usage record per assistant message");
+    assert.equal(usage[0].model, "openrouter/m1");
+    assert.equal(usage[0].input, 1000);
+    assert.equal(usage[0].output, 500);
+    assert.equal(usage[0].cacheRead, 100);
+    assert.equal(usage[0].costUsd, 0.02);
+    assert.equal(usage[0].ok, true);
+    assert.ok(!/prompt|content|request/i.test(JSON.stringify(usage[0])), "no content-bearing fields");
+  } finally {
+    cleanup();
+  }
+});

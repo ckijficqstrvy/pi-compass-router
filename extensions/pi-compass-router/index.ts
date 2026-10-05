@@ -13,7 +13,7 @@ import { selectTargets, targetKey, tierOfModel } from "./route/select.js";
 import { applyRoute, type ApplyHooks } from "./route/apply.js";
 import { runFactsRefresh } from "./ui/facts-refresh.js";
 import { appendDecision, readDecisions } from "./decisions.js";
-import { formatCounts, summarizeDecisions } from "./stats.js";
+import { formatCosts, formatCounts, summarizeDecisions } from "./stats.js";
 import {
   classifyModelError,
   coolingReason,
@@ -477,6 +477,16 @@ function writeEntry(pi: ExtensionAPI, entry: RouteEntry): void {
 }
 
 /**
+ * 從 pi 的 usage 物件安全取一個數字欄位（型別可能缺欄位；非有限值回 undefined）。
+ * 供逐輪用量記錄使用，不依賴特定 pi 版本的 Usage 型別。
+ */
+function usageNumber(source: unknown, key: string): number | undefined {
+  if (typeof source !== "object" || source === null) return undefined;
+  const value = (source as Record<string, unknown>)[key];
+  return typeof value === "number" && Number.isFinite(value) ? value : undefined;
+}
+
+/**
  * 把「因健康狀態被跳過的候選」併進 entry notes（去重，SPEC Part 8.4）。
  */
 function healthNotes(notes: string[] | undefined, avoided: readonly string[]): string[] | undefined {
@@ -564,8 +574,27 @@ export default function compass(pi: ExtensionAPI): void {
 
     const provider = message.provider;
     const modelId = message.model;
-    if (!provider || !modelId) return;
-    const modelKey = `${provider}/${modelId}`;
+    const modelKey = provider && modelId ? `${provider}/${modelId}` : null;
+
+    // 逐輪真實用量／成本（2026-10-05；非內容欄位）。讓日後能按 kind/model/tier
+    // 評估實際花費，而不只有 `state.json` 的聚合總額。即使 provider/model 缺失
+    // 也記一筆（model 為 null），成本不會因此漏帳。
+    if (state.config.decisionLog) {
+      appendDecision({
+        type: "usage",
+        model: modelKey,
+        input: usageNumber(message.usage, "input"),
+        output: usageNumber(message.usage, "output"),
+        cacheRead: usageNumber(message.usage, "cacheRead"),
+        cacheWrite: usageNumber(message.usage, "cacheWrite"),
+        costUsd: typeof total === "number" ? total : undefined,
+        ok: message.stopReason !== "error",
+        tier: state.lastDecision?.tier ?? null,
+        kind: state.lastDecision?.kind,
+      });
+    }
+
+    if (!provider || !modelId || modelKey === null) return;
 
     if (message.stopReason === "error") {
       const failure = classifyModelError(message.errorMessage, message.rawStopReason);
@@ -575,6 +604,17 @@ export default function compass(pi: ExtensionAPI): void {
       const marked = state.health.markFailure(provider, modelId, failure.klass);
       saveHealth(state.health);
       if (!alreadyCooling) {
+        // 持久化故障歷史（2026-10-05）：health.json 的冷卻會過期／成功即清除，
+        // 這筆留在決策日誌裡，日後才能統計「哪些 provider 最常壞」。
+        if (state.config.decisionLog) {
+          appendDecision({
+            type: "health",
+            provider,
+            model: modelId,
+            klass: failure.klass,
+            scope: marked.provider ? "provider" : "model",
+          });
+        }
         // 額度/認證是帳號層級：說明整個 provider 被避開，否則只說這個模型。
         if (marked.provider) explainModelFailure(pi, ctx, provider, modelId, marked.provider, "provider");
         else explainModelFailure(pi, ctx, provider, modelId, marked.model, "model");
@@ -808,6 +848,8 @@ function showLog(ctx: ExtensionContext, state: SessionState, arg: string | undef
       lines.push(clip(tr(lang)`回饋 ${record.feedback} ${record.from ?? "-"} → ${record.to ?? "-"}`));
       continue;
     }
+    // usage / health 只進下方聚合，不逐筆列（避免洗版）。
+    if (record.type !== "route") continue;
     const conf = record.kindConfidence === undefined ? "" : ` ${Math.round(record.kindConfidence * 100)}%`;
     lines.push(
       clip(`${record.symbol ?? "?"} ${record.tier ?? "-"} ${record.model ?? "-"} · ${record.kind ?? "?"}${conf} · ${record.outcome ?? "-"}`),
@@ -822,6 +864,15 @@ function showLog(ctx: ExtensionContext, state: SessionState, arg: string | undef
   if (tiers) lines.push(clip(tr(lang)`層級 ${tiers}`));
   const models = formatCounts(stats.models);
   if (models) lines.push(clip(tr(lang)`模型 ${models}`));
+  if (stats.usageCount > 0) {
+    lines.push(tr(lang)`實際花費 ≈ $${stats.usageCostUsd.toFixed(3)}（${stats.usageCount} 輪）`);
+  }
+  const costByKind = formatCosts(stats.costByKind);
+  if (costByKind) lines.push(clip(tr(lang)`花費 kind ${costByKind}`));
+  const costByModel = formatCosts(stats.costByModel);
+  if (costByModel) lines.push(clip(tr(lang)`花費 model ${costByModel}`));
+  const failures = formatCounts(stats.failures);
+  if (failures) lines.push(clip(tr(lang)`故障 ${failures}`));
   if (stats.cacheMissAvgUsd !== null) {
     lines.push(tr(lang)`cache miss 平均 ≈ $${stats.cacheMissAvgUsd.toFixed(3)}（${stats.cacheMissCount} 筆）`);
   }

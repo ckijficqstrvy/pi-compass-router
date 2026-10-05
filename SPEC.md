@@ -505,8 +505,11 @@ fail-open（不崩，但也不路由）。
 - 輸出永不回顯金鑰值。
 - **決策日誌**（`decisions.jsonl`，2026-10-03 新增）只寫**非內容欄位**：
   kind/信心、demand、tier、模型、thinking、結果、cache 估算，以及使用者的
-  回饋（revert / manual-override）。**不寫 prompt 或對話原文**——
-  預設開啟，`decisionLog: false` 可關。
+  回饋（revert / manual-override）。2026-10-05 再增兩型：逐輪 `usage`
+  （model/input/output/cacheRead/cacheWrite/costUsd/ok/tier/kind）與持久
+  `health`（provider/model/klass/scope）——前者供事後評估實際花費、後者補
+  `health.json` 冷卻過期後就消失的缺口。**不寫 prompt 或對話原文**——
+  預設開啟，`decisionLog: false` 可關（四型皆受此開關控制）。
 
 ---
 
@@ -1516,5 +1519,7 @@ pi-compass/
 | 7 | **事前**成本投影（C1）：`estimateTurnUsd`（context 當輸入 + `OUTPUT_TOKEN_ESTIMATE` 當輸出）在選定目標後估算本輪成本；若會觸及 hard ratio 則再降一層重選（只在重選有目標時採用），`budgetForced` 一併設真以豁免 deadband/cache | Part 8、Part 5 Stage 4 |
 | 8 | **走鐘修正**：`suggest.scoresFile` 的 schema 由 `NonEmpty` 改為 `String`——空字串是 Part 10.1 定義的「未指定→自動校準」合法值，舊 schema 會誤報 `suggest needs {scoresFile: string}` 並忽略整塊 | Part 3.1、Part 10.1、Part 3.4 |
 | 9 | **走鐘修正**：`writeConfigPatch` 的頂層 `null` 現在真的**刪除該鍵**（先前落到 else 分支寫成字面 `"suggest": null`，使下次載入噴警告）；與 Part 3.4「null = 刪除」契約一致 | Part 3.4 |
+| 10 | 逐輪 `usage` 記錄：`message_end` 對每個 assistant message 寫 model/input/output/cacheRead/cacheWrite/costUsd/ok/tier/kind（非內容）；`stats` 聚合出實際總花費與 cost-by-kind/model | Part 8、Part 11 |
+| 11 | 持久 `health` 記錄：故障首次進入冷卻時寫 provider/model/klass/scope；`stats` 聚合出 failures-by-class | Part 8.4、Part 11 |
 
 未做/排除：分類準確度評估集、npm 發佈；健康冷卻秒數仍為內建常數（B2，待有實測需求再開放）。

@@ -65,10 +65,11 @@ export function scoresFromHistory(
       // Only a real switch means the model was chosen; `held` also covers
       // deadband/cooldown/cache holds where the router kept the current model.
       if (record.outcome === "applied") bump(chosen, record.model);
-    } else {
+    } else if (record.type === "feedback") {
       bump(neg, record.from);
       bump(pos, record.to);
     }
+    // usage / health 記錄不是回饋訊號——刻意不影響建議分數。
   }
 
   const keys = new Set([...pos.keys(), ...neg.keys(), ...chosen.keys()]);

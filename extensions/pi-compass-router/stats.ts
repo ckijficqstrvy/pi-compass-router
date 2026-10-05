@@ -13,6 +13,12 @@ export interface Count {
   count: number;
 }
 
+/** 一個金額項（值 + USD）。 */
+export interface CostCount {
+  key: string;
+  usd: number;
+}
+
 /** 決策日誌的聚合結果（全部落在視窗內）。 */
 export interface DecisionStats {
   /** route 紀錄總數（視窗內）。 */
@@ -35,6 +41,15 @@ export interface DecisionStats {
   /** 有 cache 估算的筆數與平均值（USD）。 */
   cacheMissCount: number;
   cacheMissAvgUsd: number | null;
+  /** 逐輪真實用量：筆數與總成本（USD）。 */
+  usageCount: number;
+  usageCostUsd: number;
+  /** 逐輪成本依 kind 彙總（USD，前 RANK_LIMIT 名）。 */
+  costByKind: CostCount[];
+  /** 逐輪成本依 model 彙總（USD，前 RANK_LIMIT 名）。 */
+  costByModel: CostCount[];
+  /** provider 故障事件依 class 彙總（持久歷史，非 health.json 的即時冷卻）。 */
+  failures: Count[];
 }
 
 /** 依次數由多到少排序（同分依 key 字典序穩定）。 */
@@ -42,6 +57,14 @@ function rank(map: Map<string, number>, limit: number): Count[] {
   return [...map.entries()]
     .map(([key, count]) => ({ key, count }))
     .sort((a, b) => b.count - a.count || a.key.localeCompare(b.key))
+    .slice(0, limit);
+}
+
+/** 依金額由大到小排序（同額依 key 字典序）。 */
+function rankCost(map: Map<string, number>, limit: number): CostCount[] {
+  return [...map.entries()]
+    .map(([key, usd]) => ({ key, usd }))
+    .sort((a, b) => b.usd - a.usd || a.key.localeCompare(b.key))
     .slice(0, limit);
 }
 
@@ -77,11 +100,19 @@ export function summarizeDecisions(
     models: [],
     cacheMissCount: 0,
     cacheMissAvgUsd: null,
+    usageCount: 0,
+    usageCostUsd: 0,
+    costByKind: [],
+    costByModel: [],
+    failures: [],
   };
 
   const kinds = new Map<string, number>();
   const tiers = new Map<string, number>();
   const models = new Map<string, number>();
+  const costKind = new Map<string, number>();
+  const costModel = new Map<string, number>();
+  const failures = new Map<string, number>();
   let cacheMissSum = 0;
 
   for (const record of records) {
@@ -89,6 +120,23 @@ export function summarizeDecisions(
     if (record.type === "feedback") {
       if (record.feedback === "revert") stats.revert += 1;
       else if (record.feedback === "manual-override") stats.manualOverride += 1;
+      continue;
+    }
+    if (record.type === "usage") {
+      stats.usageCount += 1;
+      const usd =
+        typeof record.costUsd === "number" && Number.isFinite(record.costUsd) && record.costUsd > 0
+          ? record.costUsd
+          : 0;
+      stats.usageCostUsd += usd;
+      if (usd > 0) {
+        if (record.kind) costKind.set(record.kind, (costKind.get(record.kind) ?? 0) + usd);
+        if (record.model) costModel.set(record.model, (costModel.get(record.model) ?? 0) + usd);
+      }
+      continue;
+    }
+    if (record.type === "health") {
+      bump(failures, record.klass);
       continue;
     }
 
@@ -126,6 +174,9 @@ export function summarizeDecisions(
   stats.tiers = rank(tiers, RANK_LIMIT);
   stats.models = rank(models, RANK_LIMIT);
   stats.cacheMissAvgUsd = stats.cacheMissCount > 0 ? cacheMissSum / stats.cacheMissCount : null;
+  stats.costByKind = rankCost(costKind, RANK_LIMIT);
+  stats.costByModel = rankCost(costModel, RANK_LIMIT);
+  stats.failures = rank(failures, RANK_LIMIT);
   return stats;
 }
 
@@ -133,4 +184,10 @@ export function summarizeDecisions(
 export function formatCounts(counts: readonly Count[]): string | undefined {
   if (counts.length === 0) return undefined;
   return counts.map((entry) => `${entry.key} ${entry.count}`).join(" · ");
+}
+
+/** 一行「key $x.xxx · …」；空則回 undefined。 */
+export function formatCosts(costs: readonly CostCount[]): string | undefined {
+  if (costs.length === 0) return undefined;
+  return costs.map((entry) => `${entry.key} $${entry.usd.toFixed(3)}`).join(" · ");
 }

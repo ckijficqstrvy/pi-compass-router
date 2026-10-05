@@ -197,3 +197,22 @@ test("a successful turn clears the cooldown and the model is routable again", as
     cleanup();
   }
 });
+
+test("a provider failure is persisted to the decision log as a health record (2026-10-05)", async () => {
+  const { handlers, ctx, home, cleanup } = await boot();
+  try {
+    handlers["message_end"](failedTurn("openrouter", "m1", "402 Payment Required: insufficient credits"), ctx);
+    const lines = readFileSync(join(home, ".pi/agent/pi-compass/decisions.jsonl"), "utf8")
+      .trim()
+      .split("\n")
+      .filter(Boolean)
+      .map((line) => JSON.parse(line) as Record<string, unknown>);
+    const health = lines.filter((record) => record.type === "health");
+    assert.equal(health.length, 1, "one durable health record");
+    assert.equal(health[0].klass, "quota");
+    assert.equal(health[0].scope, "provider", "quota is account-wide");
+    assert.equal(health[0].provider, "openrouter");
+  } finally {
+    cleanup();
+  }
+});

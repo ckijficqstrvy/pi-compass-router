@@ -43,7 +43,44 @@ export interface FeedbackRecord {
   kind?: string;
 }
 
-export type DecisionRecord = RouteDecisionRecord | FeedbackRecord;
+/**
+ * 逐輪的真實用量與成本（2026-10-05 新增；非內容欄位）。
+ * 為什麼要有：先前只把 `usage.cost.total` 記進 `state.json` 的**聚合總額**，
+ * 決策日誌只有 cache miss 估算，無法回答「哪類決策實際最花錢」。
+ */
+export interface UsageRecord {
+  type: "usage";
+  /** `provider/model`，缺失時 `null`。 */
+  model: string | null;
+  input?: number;
+  output?: number;
+  cacheRead?: number;
+  cacheWrite?: number;
+  /** registry 回報的實際成本（USD）。 */
+  costUsd?: number;
+  /** 該輪是否為正常完成（`stopReason !== "error"`）。 */
+  ok: boolean;
+  /** 最近一次路由的層級／種類（供成本歸類；無則省略）。 */
+  tier?: string | null;
+  kind?: string;
+}
+
+/**
+ * 一次 provider 故障事件（2026-10-05 新增；非內容欄位）。
+ * 為什麼要有：`health.json` 的冷卻**會過期／成功即清除**，無法回答
+ * 「過去一週哪些 provider 最常壞」。這筆是持久的歷史。
+ */
+export interface HealthRecord {
+  type: "health";
+  provider: string;
+  model: string;
+  /** `rate_limit` / `quota` / `auth` / `server` / `timeout`。 */
+  klass: string;
+  /** `provider` = 整帳號層級（quota/auth），`model` = 單一模型。 */
+  scope: "model" | "provider";
+}
+
+export type DecisionRecord = RouteDecisionRecord | FeedbackRecord | UsageRecord | HealthRecord;
 
 /** 測試可注入路徑。回傳實際寫入的檔案（成功時）或 undefined（失敗吞掉）。 */
 export function appendDecision(record: DecisionRecord, file: string = decisionsFile()): void {
