@@ -9,7 +9,18 @@
 > S2：`selection: "registry"` → `policy/candidates.ts` 由 registry 全體建可行集
 > （能力查 canonical、價格取健康 endpoint 中位數、政策/冷卻照舊），接上
 > `selectTargets`/`planTurn`。實測 504 routes、每層上限 25 並去重。
+> S4：`policy/preferences.ts` 從 decisions.jsonl 學衰減偏好（半衰期 14 天、±5），只當
+> 可行集內排序項。
 > 實測 deepseek-v4.1-flash 30 個上游最便宜健康價 $0.09/$0.18 vs 摘要價 $0.3/$1.2。
+>
+> **S3（目標函數）資料受限**：需要各模型的 coding/agentic 分數（AA），目前未蒐集；
+> 在只有 intelligence 的情況下它與 S2 等價。
+>
+> **OR 上游選擇：可行但屬 pi 層**。pi 的 model config 支援 `openRouterRouting`
+> （`sort: {by:"price"}` / `order` / `only` / `ignore` / `max_price` / `zdr` …），
+> 這是**模型層設定（models.json）**，而 compass 每回合只能用 `setModel(provider,id)`——
+> 所以要在 OpenRouter 真正鎖到最便宜上游，得在 pi 的 models.json 對那些 model 設
+> routing 偏好（靜態），不是 compass runtime 能做的。
 
 ## 1. 問題：三個不同的東西被擠在同一張表
 
