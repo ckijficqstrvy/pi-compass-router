@@ -64,6 +64,18 @@ test("quota and auth also cool down the whole provider", () => {
   assert.equal(auth.provider?.until, now + 360 * 60_000);
 });
 
+test("a 402 for an oversized max_tokens is credit_cap, not account-wide quota", () => {
+  const msg =
+    '402: {"message":"This request requires more credits, or fewer max_tokens. You requested up to 131072 tokens, but can only afford 89358.","code":402}';
+  assert.equal(classifyModelError(msg)?.klass, "credit_cap");
+  const health = new ModelHealth();
+  const now = 6_000_000;
+  const marked = health.markFailure("openrouter", "big-model", "credit_cap", now);
+  assert.equal(marked.provider, undefined, "帳號還有錢；只是這次預借的 max_tokens 太大");
+  assert.equal(marked.model.until, now + 5 * 60_000);
+  assert.equal(health.isCoolingDown("provider:openrouter", now), false, "不該封整個 provider");
+});
+
 test("a server error cools only that model, not the provider", () => {
   const health = new ModelHealth();
   const now = 7_000_000;

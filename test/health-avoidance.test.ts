@@ -164,6 +164,8 @@ test("when every candidate is cooling down, the turn is skipped with an explicit
   try {
     handlers["message_end"](failedTurn("openrouter", "m2", "HTTP 429 Too Many Requests"), ctx);
     handlers["message_end"](failedTurn("openrouter", "m1", "HTTP 429 Too Many Requests"), ctx);
+    // 當前模型（m0）也在冷卻：訊息應明說這輪註定再失敗並給出補救方向（P1）。
+    handlers["message_end"](failedTurn("openrouter", "m0", "HTTP 429 Too Many Requests"), ctx);
 
     setModels.length = 0;
     appends.length = 0;
@@ -176,8 +178,16 @@ test("when every candidate is cooling down, the turn is skipped with an explicit
       "the skipped entry states that every candidate is cooling down",
     );
     assert.ok(
-      notices.some((n) => n.type === "warning" && n.message.includes("every candidate is cooling down")),
+      notices.some((n) => n.type === "warning" && n.message.includes("all candidates cooling down")),
       "the UI explains why nothing was switched",
+    );
+    assert.ok(
+      notices.some((n) => n.message.includes("allowed providers:")),
+      "the UI names the providers that were allowed (可行動資訊)",
+    );
+    assert.ok(
+      notices.some((n) => n.message.includes("the current model is cooling too")),
+      "the UI warns when the current model is cooling as well",
     );
   } finally {
     cleanup();

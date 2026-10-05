@@ -20,7 +20,7 @@ import { dirname, join } from "node:path";
 import { acquireLock, releaseLock } from "./lock.js";
 
 /** 可避開的錯誤類別。`context_overflow` 刻意不在其中（見檔頭）。 */
-export type ModelErrorClass = "rate_limit" | "quota" | "auth" | "server" | "timeout";
+export type ModelErrorClass = "rate_limit" | "quota" | "credit_cap" | "auth" | "server" | "timeout";
 
 /** 一次失敗標記（只含非內容欄位）。 */
 export interface ModelFailure {
@@ -40,6 +40,9 @@ export interface ModelFailure {
 export const COOLDOWN_MS: Readonly<Record<ModelErrorClass, number>> = {
   rate_limit: 60_000,
   quota: 30 * 60_000,
+  // 402 但只是「預借的 max_tokens 超過餘額」（見 CREDIT_CAP）：換小模型/降上限
+  // 即可，不該封整個 provider，故短冷卻且只及於該 model。
+  credit_cap: 5 * 60_000,
   auth: 360 * 60_000,
   server: 60_000,
   timeout: 30_000,
@@ -48,6 +51,7 @@ export const COOLDOWN_MS: Readonly<Record<ModelErrorClass, number>> = {
 const LABELS: Readonly<Record<ModelErrorClass, string>> = {
   rate_limit: "rate limit (429)",
   quota: "quota / insufficient credits",
+  credit_cap: "insufficient credits for the requested max_tokens (lower the output cap or use a smaller model)",
   auth: "authentication failed",
   server: "provider server error",
   timeout: "timeout / connection error",
@@ -66,6 +70,9 @@ export function healthFile(): string {
 // 「5000 tokens」被當成 5xx。
 const CONTEXT_OVERFLOW =
   /context[_ ]?length|context[_ ]?window|maximum context|too many tokens|max(imum)? tokens|ctx_len/i;
+// 402 的子型：不是帳號沒錢，而是本次預借的 max_tokens 大於餘額。openrouter 的
+// remedy 自己寫「fewer max_tokens」；降上限或換小模型即可，不需 provider-wide 封鎖。
+const CREDIT_CAP = /fewer max_?tokens|lower max_?tokens|reduce max_?tokens|can only afford/i;
 const QUOTA = /\b402\b|payment required|insufficient|out of (funds|credits)|quota|billing|no credits/i;
 const RATE = /\b429\b|rate.?limit|too many requests|slow down/i;
 const AUTH = /\b401\b|\b403\b|unauthori[sz]ed|forbidden|invalid api key|authentication/i;
@@ -83,6 +90,7 @@ export function classifyModelError(
   const text = `${errorMessage ?? ""} ${rawStopReason ?? ""}`;
   if (text.trim() === "") return null;
   if (CONTEXT_OVERFLOW.test(text)) return null; // pi 會壓縮後重試，非故障
+  if (CREDIT_CAP.test(text)) return { klass: "credit_cap", label: LABELS.credit_cap };
   if (QUOTA.test(text)) return { klass: "quota", label: LABELS.quota };
   if (RATE.test(text)) return { klass: "rate_limit", label: LABELS.rate_limit };
   if (AUTH.test(text)) return { klass: "auth", label: LABELS.auth };

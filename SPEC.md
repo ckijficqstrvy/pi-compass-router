@@ -853,12 +853,18 @@ pressure = max(today÷dailyUsd, month÷monthlyUsd)
 `model`／`stopReason`／`errorMessage`／`rawStopReason`）：
 
 - 只處理 `stopReason === "error"`。`classifyModelError()` 分類成
-  `rate_limit`（429，60s）、`quota`（402／額度，30m）、`auth`（401/403，6h）、
-  `server`（5xx，60s）、`timeout`（連線，30s）。
+  `rate_limit`（429，60s）、`quota`（402 且帳號層級額度不足，30m）、
+  `credit_cap`（402 但只是本次預借的 `max_tokens` 超過餘額——訊息含
+  `fewer max_tokens`／`can only afford`；只冷卻該 model 5m，不封 provider，
+  2026-10-05）、`auth`（401/403，6h）、`server`（5xx，60s）、`timeout`（連線，30s）。
 - **context overflow 一律不標記**（`context_length_exceeded` 等）：pi 會自行
   壓縮後重試，不是故障。
 - `quota`／`auth` 是帳號層級 → 同時標記整個 provider；其餘只標記該 model。
 - 成功回應即清除該 model 的冷卻。
+- 全部候選都在冷卻時（Part 5 Stage 5 skipped），`skipReason`／UI 警告必須可行動：
+  列出冷卻候選、`allowProviders` 範圍，且若**當前模型也在冷卻**則明說
+  「this turn will likely fail」並指出補救方向（加一個有額度的 provider 或等冷卻）
+  （2026-10-05）。
 - 狀態存 `health.json`（0600、只存非內容欄位、過期即丟）。路由端在
   `deps.isAvailable` 透過 `coolingReason()` 查詢，`planTurn` 維持純函式；
   被跳過的候選寫進 entry notes。
@@ -1522,5 +1528,8 @@ pi-compass/
 | 10 | 逐輪 `usage` 記錄：`message_end` 對每個 assistant message 寫 model/input/output/cacheRead/cacheWrite/costUsd/ok/tier/kind（非內容）；`stats` 聚合出實際總花費與 cost-by-kind/model | Part 8、Part 11 |
 | 11 | 持久 `health` 記錄：故障首次進入冷卻時寫 provider/model/klass/scope；`stats` 聚合出 failures-by-class | Part 8.4、Part 11 |
 | 12 | **載入容錯**：`config.json` 頂層殘留的 `null`（舊版寫入層落下的字面值）視為「該鍵未設定」→ 走預設、不噴警告；未知鍵即使為 `null` 仍被白名單擋下。防舊 session 寫回 `"suggest": null` 後每次啟動重印同一行警告 | Part 3.4 |
+| 13 | **402 細分**：新增 `credit_cap` 類別——402 但訊息含 `fewer max_tokens`／`can only afford`（本次預借的 max_tokens 超過餘額）只冷卻該 model 5m，不 provider-wide 封鎖；真正的帳號額度不足仍歸 `quota`（30m、provider-wide）。修正 openrouter 402 把整個 provider 誤封 30m 的問題 | Part 8.4 |
+| 14 | 全部候選冷卻的 skipped 訊息可行動化：列出冷卻候選、`allowProviders` 範圍，且當前模型也在冷卻時明說「this turn will likely fail」與補救方向 | Part 8.4、Part 5 Stage 5 |
+| 15 | `accept.sh` 第 3 項去耦供應商可用性：只把 `Failed to load extension` 判失敗，供應商 402／斷線視為載入成功（gate 不再因帳務/網路變紅） | Part 12 |
 
 未做/排除：分類準確度評估集、npm 發佈；健康冷卻秒數仍為內建常數（B2，待有實測需求再開放）。

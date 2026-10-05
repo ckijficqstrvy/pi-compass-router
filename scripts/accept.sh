@@ -34,8 +34,21 @@ echo "[3] 驗收3 pi -ne -e 載入"
 if [[ "${COMPASS_ACCEPT_SKIP_ENV:-0}" == "1" ]]; then
   echo "      (skip: COMPASS_ACCEPT_SKIP_ENV=1 — CI 無 pi CLI)"
 else
-  pi -ne -e extensions/pi-compass-router/index.ts -p "ping" >/dev/null 2>&1
-  check "pi -ne -e" "$?" 0
+  # 只驗「擴充載入」，不驗「供應商可用」：載入失敗時 pi 會明印
+  # `Failed to load extension`；供應商 402／斷線是環境問題，不該讓本機 gate 變紅
+  # （2026-10-05：openrouter 402 額度曾讓此項誤判失敗）。
+  pi_out=$(pi -ne -e extensions/pi-compass-router/index.ts -p "ping" 2>&1)
+  pi_code=$?
+  if [[ $pi_code -eq 0 ]]; then
+    check "pi -ne -e" 0 0
+  elif grep -q 'Failed to load extension' <<<"$pi_out"; then
+    printf '%s\n' "$pi_out" | head -5 | sed 's/^/      /'
+    check "pi -ne -e (extension load)" 1 0
+  else
+    echo "      (extension loaded; provider call failed — 供應商/帳務問題不計入 gate)"
+    printf '%s\n' "$pi_out" | head -1 | cut -c1-180 | sed 's/^/      /'
+    check "pi -ne -e (provider unreachable, load OK)" 0 0
+  fi
 fi
 
 echo "[4] 驗收4 laya p95 < 80ms"

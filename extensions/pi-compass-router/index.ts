@@ -287,7 +287,21 @@ async function routeTurn(
     const skippedHooks = buildHooks(pi, ctx);
     // B3（2026-10-05）：若不可用是**健康冷卻**造成（avoided 非空），講清楚是
     // 「全部候選都在冷卻、沿用當前模型」，不要一律寫 no route available。
-    const skipReason = avoided.length > 0 ? "all candidates cooling down; keeping current model" : "no route available";
+    // P1（2026-10-05）：再加可行動資訊——允許的供應商，以及「當前模型是否也
+    // 在冷卻」（若是，這輪幾乎註定再失敗一次，而不是換個模型就好）。
+    const coolingUnique = [...new Set(avoided)];
+    const cooling = coolingUnique.length > 0;
+    let skipReason = cooling ? "all candidates cooling down; keeping current model" : "no route available";
+    if (cooling) {
+      const providers = config.allowProviders.length > 0 ? config.allowProviders.join(", ") : "any";
+      const cur = ctx.model;
+      const curCooling = cur ? coolingReason(state.health, cur.provider, cur.id) : undefined;
+      skipReason =
+        `all candidates cooling down (${coolingUnique.join("; ")}); allowed providers: ${providers}` +
+        (curCooling
+          ? "; the current model is cooling too, so this turn will likely fail — add a funded provider to allowProviders or wait for the cooldown"
+          : "");
+    }
     await applyRoute(
       {
         outcome: "skipped",
@@ -300,11 +314,8 @@ async function routeTurn(
       },
       skippedHooks,
     );
-    if (avoided.length > 0 && ctx.hasUI) {
-      ctx.ui.notify(
-        `compass: every candidate is cooling down (${[...new Set(avoided)].join("; ")}); keeping the current model`,
-        "warning",
-      );
+    if (cooling && ctx.hasUI) {
+      ctx.ui.notify(`compass: ${skipReason}`, "warning");
     }
     if (config.decisionLog) {
       appendDecision({
