@@ -122,12 +122,13 @@
     },
     {
       "provider": "openrouter",
-      "model": "deepseek/deepseek-v4-flash",
+      "model": "deepseek/deepseek-v4.1-flash",
       "capability": 39,
       "price": {
-        "input": 0.042,
-        "output": 0.084
-      }
+        "input": 0.003,
+        "output": 2.4
+      },
+      "note": "DeepSeek V4.1 Flash; slug corrected 2026-10-05 (the old deepseek/deepseek-v4-flash is the 0423 model, a different/older generation). openrouter price is the OpenRouter API value ($0.003/$2.4 per 1M, verified live 2026-10-05); the pi catalogue / native deepseek entry is $0.3/$1.2. AA intelligence index 39 (reasoning, max effort)"
     },
     {
       "provider": "openrouter",
