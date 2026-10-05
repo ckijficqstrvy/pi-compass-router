@@ -659,6 +659,11 @@ tier 直接 `standard`、thinking 取 `TIER_THINKING[standard]`，
 5. **cooldown** — 切換後 `cooldownSeconds` 內，只有
    層級跳躍 ≥ `bypassTierDelta` 或 hardRatio 降級可再切
 
+（2026-10-05）**`confirm` 模式下 deadband / cache / cooldown 三個守衛一律讓路**（stickiness
+除外）：confirm 的每一次切換本來就要使用者同意，防抖動是多餘的；留著只會讓「guard 想
+hold」的回合靜默 keep、不再詢問，使用者就失去決定權（實測：當前 deepseek、目標 xiaomi
+v2.6、同層但仍在 cooldown 內 → 直接 held、不問）。讓路後會走到 `applied` 觸發既有詢問。
+
 mode 決定 Stage 5 動作：
 
 | mode | applied | held | skipped |
@@ -1568,5 +1573,6 @@ pi-compass/
 | 19 | **canonical 身分 + route/endpoint（S1/S1b）**：新增 `policy/routes.ts`（`canonicalOf`/`bestEndpoint`/`capabilityByCanonical`/`buildRoutes`）；`facts` 加選配 `canonical`。能力是模型級、價格是 route 級；同一模型跨 provider 共用分數。`refresh-facts` 快取 OpenRouter endpoints（實測 v4.1-flash 30 上游，最便宜健康 $0.09/$0.18 vs 摘要 $0.3/$1.2） | Part 9 |
 | 20 | **registry 可行集（S2）**：`selection: bands｜registry`（預設 bands）＋ `policy/candidates.ts`。`registry` 由 pi registry 全體建可行集（政策/冷卻/能力下限/中位數價格天花板，能力降價升，上限 25 並去重），接 `selectTargets`/`planTurn`；無可行集時退回 bands | Part 3.1、Part 9 |
 | 21 | **衰減偏好（S4）**：`policy/preferences.ts` 從 `decisions.jsonl` 的 feedback（manual-override / revert）與 usage.ok 學**依 kind 分開**的偏好，半衰期 14 天、分數夾 ±3、加分夾 ±5。只當可行集**內排序**加分，不影響硬約束。解「愛用模型不想手設、新模型用完不用刪設定」 | Part 9 |
+| 22 | **confirm 模式讓路**：`guard()` 在 `mode==="confirm"` 時跳過 deadband/cache/cooldown 的 hold（stickiness 仍 hold）。先前這三個守衛會讓「目標不同卻在冷卻/死區內」的回合靜默 keep、不彈確認，使用者無法決定 | Part 5 Stage 4、Part 7 |
 
 未做/排除：分類準確度評估集、npm 發佈；健康冷卻秒數仍為內建常數（B2，待有實測需求再開放）。

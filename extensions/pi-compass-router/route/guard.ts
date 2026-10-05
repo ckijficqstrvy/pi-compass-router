@@ -126,8 +126,15 @@ export function guard(
   const tierDelta = currentRank === null ? 0 : Math.abs(rank(tier) - currentRank);
   const bypass = tierDelta >= config.cache.bypassTierDelta;
 
+  // confirm 模式：deadband / cache / cooldown 這三個「先不切、留待以後」的守衛**一律讓路**。
+  // 理由：confirm 模式下每一次切換都已經要使用者同意，防抖動是多餘的；留著只會讓
+  // 「guard 想 hold」的回合**靜默 keep、不再詢問**，使用者就失去了決定權（2026-10-05
+  // 實測：當前 deepseek、目標 xiaomi v2.6、同層但仍在 cooldown 內 → 直接 held、不問）。
+  // stickiness 不在此列：目標=當前，沒有東西可問，仍 hold。
+  const holdGuardsArmed = mode !== "confirm";
+
   // 3. cache（Part 7）：deadband 與懲罰上限。
-  if (config.cache.aware && state.currentTier !== null && tier !== state.currentTier) {
+  if (holdGuardsArmed && config.cache.aware && state.currentTier !== null && tier !== state.currentTier) {
     const movingUp = rank(tier) > rank(state.currentTier);
     // 上切：需求得超出「目標層的下限」一個 deadband（目標層下限 = 當前層的上界）。
     // 下切：需求得跌破「**當前層**的下限」一個 deadband。
@@ -148,6 +155,7 @@ export function guard(
   }
 
   if (
+    holdGuardsArmed &&
     config.cache.aware &&
     state.cachePenaltyUsd !== undefined &&
     state.cachePenaltyUsd > config.cache.maxPenaltyUsd &&
@@ -171,7 +179,7 @@ export function guard(
 
   // 4. cooldown（Part 7）：大跳與 hardRatio 降級豁免。
   const cooldownSeconds = config.cache.cooldownSeconds;
-  if (cooldownSeconds > 0 && state.lastSwitchAtMs !== null && !budgetForced && !bypass) {
+  if (holdGuardsArmed && cooldownSeconds > 0 && state.lastSwitchAtMs !== null && !budgetForced && !bypass) {
     const elapsedMs = Date.now() - state.lastSwitchAtMs;
     if (elapsedMs < cooldownSeconds * 1000) {
       return {

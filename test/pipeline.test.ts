@@ -286,6 +286,24 @@ test("guard: confirm mode still reaches the caller as applied (Stage 5 asks)", (
   assert.equal(result.outcome, "applied");
 });
 
+test("guard: confirm mode skips deadband/cache/cooldown holds so the user can decide", () => {
+  const cfg = config({ cache: { ...DEFAULT_CONFIG.cache, cooldownSeconds: 300 } });
+  // cooldown would hold in auto (same tier, just switched):
+  assert.equal(guard(request("standard", 1.6), state({ currentTier: "standard", lastSwitchAtMs: Date.now() }), cfg, "auto").outcome, "held");
+  assert.equal(guard(request("standard", 1.6), state({ currentTier: "standard", lastSwitchAtMs: Date.now() }), cfg, "confirm").outcome, "applied");
+  // deadband would hold a different tier in auto:
+  assert.equal(guard(request("high", 2.0), state({ currentModel: "openrouter/x", currentTier: "standard" }), cfg, "auto").outcome, "held");
+  assert.equal(guard(request("high", 2.0), state({ currentModel: "openrouter/x", currentTier: "standard" }), cfg, "confirm").outcome, "applied");
+  // cache penalty would hold a non-upgrade in auto:
+  assert.equal(guard(request("standard", 1.6), state({ currentModel: "openrouter/x", currentTier: "high", cachePenaltyUsd: 0.2 }), cfg, "auto").outcome, "held");
+  assert.equal(guard(request("standard", 1.6), state({ currentModel: "openrouter/x", currentTier: "high", cachePenaltyUsd: 0.2 }), cfg, "confirm").outcome, "applied");
+});
+
+test("guard: confirm mode still holds on stickiness (nothing to ask)", () => {
+  const result = guard(request("high", 2.8, "m1"), state({ currentModel: "openrouter/m1", currentTier: "high" }), config(), "confirm");
+  assert.equal(result.outcome, "held");
+});
+
 test("guard: an over-cap cache penalty holds a non-upgrade switch", () => {
   // 2026-10-03 校準：升級不受 cache penalty 限制；同層/降級才擋。
   const result = guard(
