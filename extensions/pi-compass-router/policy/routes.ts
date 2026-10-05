@@ -8,7 +8,7 @@
 //
 // 本模組只把身分與報價拆開，**不改路由行為**（S2 才接上 selectTargets）。純函式、
 // 不讀檔，方便單測；I/O 由呼叫端（refresh / loader）負責。
-import type { ModelFact } from "./facts.js";
+import type { ModelCapability, ModelFact } from "./facts.js";
 
 export type ProviderKind = "aggregator" | "direct";
 
@@ -39,7 +39,7 @@ export interface RegistryModel {
 
 export interface CapabilityEntry {
   canonical: string;
-  capability: number;
+  capability: ModelCapability;
   estimated: boolean;
 }
 
@@ -86,12 +86,14 @@ export function capabilityByCanonical(facts: readonly ModelFact[]): {
 } {
   const byCanonical = new Map<string, CapabilityEntry>();
   const conflicts: string[] = [];
+  const sameCapability = (a: ModelCapability, b: ModelCapability): boolean =>
+    a.intelligence === b.intelligence && a.coding === b.coding && a.agentic === b.agentic;
   for (const fact of facts) {
     const canonical = canonicalOf(fact.provider, fact.model, fact.canonical);
     const entry: CapabilityEntry = { canonical, capability: fact.capability, estimated: fact.estimated === true };
     const seen = byCanonical.get(canonical);
     if (!seen) byCanonical.set(canonical, entry);
-    else if (seen.capability !== entry.capability) conflicts.push(canonical);
+    else if (!sameCapability(seen.capability, entry.capability)) conflicts.push(canonical);
   }
   return { byCanonical, conflicts };
 }

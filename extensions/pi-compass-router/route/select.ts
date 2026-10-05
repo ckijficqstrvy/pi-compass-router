@@ -1,5 +1,5 @@
 // route/select.ts — Stage 3：候選鏈組裝（SPEC Part 5：專家 → 層級 → 池）。
-import { MODEL_FACTS, blendedOf, factFor, factsValid, rankedFacts } from "../policy/facts.js";
+import { MODEL_FACTS, blendedOf, factFor, factsValid, primaryCapability, rankedFacts } from "../policy/facts.js";
 import { ceilingFor, filterChain } from "../policy/filter.js";
 import { TIERS, TIER_CAPABILITY_FLOOR, type CompassConfig, type Target, type Tier } from "../schema.js";
 import type { Judgment } from "../classify/types.js";
@@ -97,8 +97,9 @@ function menuGate(key: string, tier: Tier, config: CompassConfig, target: Target
   if (fact) {
     // 閘 4 capability ≥ 該層下限。
     const floor = TIER_CAPABILITY_FLOOR[tier];
-    if (fact.capability < floor) {
-      return `capability ${fact.capability} below floor ${floor}`;
+    const capability = primaryCapability(fact.capability);
+    if (capability < floor) {
+      return `capability ${capability} below floor ${floor}`;
     }
     // 閘 5 價格在該層價格帶內（profile/ceilings 生效值）。
     if (fact.price) {

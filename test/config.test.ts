@@ -346,7 +346,7 @@ test("autoRoutes derives tier chains from the facts file", () => {
   for (const target of config.routes.quick) {
     assert.ok(factFor(target.provider, target.model), `${target.model} must come from the facts file`);
   }
-  const capabilities = config.routes.quick.map((t) => factFor(t.provider, t.model)?.capability ?? -1);
+  const capabilities = config.routes.quick.map((t) => factFor(t.provider, t.model)?.capability.intelligence ?? -1);
   assert.deepEqual(capabilities, [...capabilities].sort((a, b) => b - a), "derived chain is capability-descending");
 });
 
@@ -431,12 +431,12 @@ test("blendedOf is input + 2×output (the ceiling metric)", () => {
 });
 
 test("factsValid rejects empty, malformed and negative facts", () => {
-  const good = { generatedAt: "2026-10-01", source: "s", models: [{ provider: "p", model: "m", capability: 40 }] };
+  const good = { generatedAt: "2026-10-01", source: "s", models: [{ provider: "p", model: "m", capability: { intelligence: 40 } }] };
   assert.equal(factsValid(good), true);
   assert.equal(factsValid({ ...good, models: [] }), false, "an empty file is unusable");
   assert.equal(factsValid({ ...good, generatedAt: 1 }), false);
-  assert.equal(factsValid({ ...good, models: [{ provider: "p", model: "m", capability: Number.NaN }] }), false);
-  assert.equal(factsValid({ ...good, models: [{ provider: "p", model: "m", capability: 1, price: { input: -1, output: 0 } }] }), false);
+  assert.equal(factsValid({ ...good, models: [{ provider: "p", model: "m", capability: { intelligence: Number.NaN } }] }), false);
+  assert.equal(factsValid({ ...good, models: [{ provider: "p", model: "m", capability: { intelligence: 1 }, price: { input: -1, output: 0 } }] }), false);
   assert.equal(factsValid(undefined), false);
 });
 
@@ -445,10 +445,10 @@ test("rankedFacts sorts by capability descending and keeps ties stable", () => {
     generatedAt: "2026-10-01",
     source: "s",
     models: [
-      { provider: "p", model: "low", capability: 10 },
-      { provider: "p", model: "tie-a", capability: 40 },
-      { provider: "p", model: "tie-b", capability: 40 },
-      { provider: "p", model: "high", capability: 90 },
+      { provider: "p", model: "low", capability: { intelligence: 10 } },
+      { provider: "p", model: "tie-a", capability: { intelligence: 40 } },
+      { provider: "p", model: "tie-b", capability: { intelligence: 40 } },
+      { provider: "p", model: "high", capability: { intelligence: 90 } },
     ],
   };
   assert.deepStrictEqual(rankedFacts(facts).map((m) => m.model), ["high", "tie-a", "tie-b", "low"]);
@@ -456,9 +456,9 @@ test("rankedFacts sorts by capability descending and keeps ties stable", () => {
 
 test("sliceBands puts each priced fact in the first band that covers it", () => {
   const ranked = [
-    { provider: "p", model: "cheap", capability: 10, price: { input: 0.5, output: 0.1 } },
-    { provider: "p", model: "mid", capability: 20, price: { input: 3, output: 1 } },
-    { provider: "p", model: "rich", capability: 30, price: { input: 100, output: 100 } },
+    { provider: "p", model: "cheap", capability: { intelligence: 10 }, price: { input: 0.5, output: 0.1 } },
+    { provider: "p", model: "mid", capability: { intelligence: 20 }, price: { input: 3, output: 1 } },
+    { provider: "p", model: "rich", capability: { intelligence: 30 }, price: { input: 100, output: 100 } },
   ];
   const bands = sliceBands(ranked, [1, 5, 15, 44, null]);
   assert.deepStrictEqual(bands[0].map((m) => m.model), ["cheap"]);
@@ -468,9 +468,9 @@ test("sliceBands puts each priced fact in the first band that covers it", () => 
 
 test("a non-last null ceiling does not swallow the whole ladder (F2)", () => {
   const ranked = [
-    { provider: "p", model: "cheap", capability: 10, price: { input: 0.5, output: 0.1 } },
-    { provider: "p", model: "mid", capability: 20, price: { input: 3, output: 1 } },
-    { provider: "p", model: "rich", capability: 30, price: { input: 100, output: 100 } },
+    { provider: "p", model: "cheap", capability: { intelligence: 10 }, price: { input: 0.5, output: 0.1 } },
+    { provider: "p", model: "mid", capability: { intelligence: 20 }, price: { input: 3, output: 1 } },
+    { provider: "p", model: "rich", capability: { intelligence: 30 }, price: { input: 100, output: 100 } },
   ];
   const bands = sliceBands(ranked, [null, 5, 15, 44, null]);
   assert.deepStrictEqual(bands[0].map((m) => m.model), [], "null at quick must not claim everything");
@@ -489,7 +489,7 @@ test("a null ceiling before a finite one is warned about (F1/F2)", () => {
 });
 
 test("a fact without a price is never banded (capability alone must not place it)", () => {
-  const ranked = [{ provider: "p", model: "unpriced", capability: 99 }];
+  const ranked = [{ provider: "p", model: "unpriced", capability: { intelligence: 99 } }];
   const bands = sliceBands(ranked, [1, 5, 15, 44, null]);
   assert.ok(bands.every((band) => band.length === 0), "an unpriced model appears in no derived chain");
 });

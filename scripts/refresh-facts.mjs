@@ -21,7 +21,7 @@
  * Usage: npm run refresh-facts [-- --dry-run] [-- --no-api] [-- --catalog <file>] [-- --facts <file>]
  *   `--no-api` 跳過 OpenRouter API（測試／離線；只走保留與 catalogue 兩條路徑）。
  */
-import { readFileSync, writeFileSync } from "node:fs";
+import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -149,6 +149,56 @@ for (const fact of facts.models ?? []) {
   if (fact.estimated) estimated.push(key);
 }
 
+// S1b（2026-10-05）：抓 OpenRouter 每個模型的 endpoint（多上游）報價 — 同一模型可有
+// 數十個上游、價差數十倍（實測 deepseek-v4.1-flash 30 個）。快取寫到 agent 目錄，
+// 供 route 層決策時取「最便宜且健康的 endpoint」；抓不到就略過（不動 facts）。
+const endpoints = {};
+async function fetchEndpoints(modelId) {
+  const response = await fetch(`${OPENROUTER_MODELS_URL}/${modelId}/endpoints`, {
+    signal: AbortSignal.timeout(10_000),
+  });
+  if (!response.ok) throw new Error(`HTTP ${response.status}`);
+  const payload = await response.json();
+  const list = Array.isArray(payload?.data?.endpoints) ? payload.data.endpoints : [];
+  return list
+    .map((e) => ({
+      upstream: typeof e?.provider_name === "string" ? e.provider_name : "unknown",
+      input: round6(Number(e?.pricing?.prompt) * 1e6),
+      output: round6(Number(e?.pricing?.completion) * 1e6),
+      contextWindow: typeof e?.context_length === "number" ? e.context_length : undefined,
+      status: typeof e?.status === "number" ? e.status : undefined,
+    }))
+    .filter((q) => Number.isFinite(q.input) && Number.isFinite(q.output));
+}
+/** 有限併發 map（避免一次打數十個請求）。 */
+async function mapPool(items, limit, fn) {
+  const out = new Array(items.length);
+  let next = 0;
+  await Promise.all(
+    Array.from({ length: Math.min(limit, items.length) }, async () => {
+      for (;;) {
+        const i = next++;
+        if (i >= items.length) return;
+        out[i] = await fn(items[i], i);
+      }
+    }),
+  );
+  return out;
+}
+if (!noApi) {
+  const ids = (facts.models ?? []).filter((f) => f.provider === "openrouter").map((f) => f.model);
+  const results = await mapPool(ids, 4, async (id) => {
+    try {
+      return [id, await fetchEndpoints(id)];
+    } catch {
+      return [id, null];
+    }
+  });
+  for (const [id, quotes] of results) {
+    if (quotes && quotes.length > 0) endpoints[`openrouter/${id}`] = quotes;
+  }
+}
+
 // 候選：catalogue 裡定價合理、但 facts 還沒描述的模型。
 const knownIds = new Set((facts.models ?? []).map((f) => f.model));
 const sanePrice = (cost) =>
@@ -169,6 +219,19 @@ facts.source =
 
 if (!dryRun) {
   writeFileSync(factsFile, `${JSON.stringify(facts, null, 2)}\n`, "utf8");
+  if (Object.keys(endpoints).length > 0) {
+    const cacheFile = join(agentDir, "pi-compass", "openrouter-endpoints.json");
+    try {
+      mkdirSync(dirname(cacheFile), { recursive: true });
+      writeFileSync(
+        cacheFile,
+        `${JSON.stringify({ generatedAt: facts.generatedAt, source: "OpenRouter /api/v1/models/{id}/endpoints", routes: endpoints }, null, 2)}\n`,
+        { mode: 0o600 },
+      );
+    } catch {
+      // best-effort：快取寫不進去不能讓 refresh 失敗。
+    }
+  }
 }
 
 console.log(`${dryRun ? "[dry run] " : ""}refreshed ${factsFile}`);
@@ -180,6 +243,7 @@ if (priced.length === 0) console.log("  (already current)");
 console.log(`\nprices unchanged: ${kept.length}`);
 console.log(`  of which retained without an OpenRouter API price (kept the existing value): ${retained.length}`);
 for (const line of retained) console.log(`    ${line}`);
+console.log(`\nendpoint quotes cached: ${Object.keys(endpoints).length} model(s)`);
 console.log(`\nnot in catalogue — check the slug (${missing.length}):`);
 for (const line of missing) console.log(`  ${line}`);
 if (missing.length === 0) console.log("  (none)");

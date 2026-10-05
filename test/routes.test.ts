@@ -56,19 +56,19 @@ test("canonicalOf: openrouter slug is already canonical, direct provider needs a
 
 test("capability is shared across providers of the same canonical model", () => {
   const facts: ModelFact[] = [
-    { provider: "openrouter", model: "deepseek/deepseek-v4.1-flash", capability: 39 },
-    { provider: "deepseek", model: "deepseek-flash", canonical: "deepseek/deepseek-v4.1-flash", capability: 39 },
+    { provider: "openrouter", model: "deepseek/deepseek-v4.1-flash", capability: { intelligence: 39 } },
+    { provider: "deepseek", model: "deepseek-flash", canonical: "deepseek/deepseek-v4.1-flash", capability: { intelligence: 39 } },
   ];
   const { byCanonical, conflicts } = capabilityByCanonical(facts);
   assert.equal(byCanonical.size, 1, "two routes of the same model collapse to one canonical");
-  assert.equal(byCanonical.get("deepseek/deepseek-v4.1-flash")?.capability, 39);
+  assert.equal(byCanonical.get("deepseek/deepseek-v4.1-flash")?.capability.intelligence, 39);
   assert.deepEqual(conflicts, []);
 });
 
 test("capabilityByCanonical reports (does not silently resolve) conflicting scores", () => {
   const facts: ModelFact[] = [
-    { provider: "openrouter", model: "x/y", capability: 40 },
-    { provider: "x", model: "y", canonical: "x/y", capability: 30 },
+    { provider: "openrouter", model: "x/y", capability: { intelligence: 40 } },
+    { provider: "x", model: "y", canonical: "x/y", capability: { intelligence: 30 } },
   ];
   const { conflicts } = capabilityByCanonical(facts);
   assert.deepEqual(conflicts, ["x/y"]);

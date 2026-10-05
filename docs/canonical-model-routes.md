@@ -1,7 +1,11 @@
 # 設計草稿：Canonical Models × Routes（2026-10-05）
 
-> 狀態：**草稿，待裁決**。本檔描述把「能力／價格／偏好」三者拆開的資料模型與遷移路徑。
-> 分支：`feat/canonical-model-routes`。第一刀只做資料層，**不動** JEV 與偏好學習。
+> 狀態：**S1/S1b 已實作（分支 `feat/canonical-model-routes`）；S2 以後待裁決**。本檔描述把
+> 「能力／價格／偏好」三者拆開的資料模型與遷移路徑。第一刀只做資料層，**不動** JEV 與偏好學習。
+>
+> 進度：S1（canonical 身分 + route/endpoint 模組）、能力向量化（intelligence 為主分數，
+> coding/agentic 有來源才填）已完成；S1b（refresh 快取 OpenRouter endpoints）已完成，
+> 實測 deepseek-v4.1-flash 30 個上游最便宜健康價 $0.09/$0.18 vs 摘要價 $0.3/$1.2。
 
 ## 1. 問題：三個不同的東西被擠在同一張表
 
