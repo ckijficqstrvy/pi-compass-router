@@ -177,6 +177,27 @@
       },
       "estimated": true,
       "note": "not on the AA list; estimated from the V2/V2.5 generation (22-25)"
+    },
+    {
+      "provider": "deepseek",
+      "model": "deepseek-flash",
+      "capability": 39,
+      "price": {
+        "input": 0.3,
+        "output": 1.2
+      },
+      "note": "DeepSeek V4.1 Flash; AA intelligence index 39 (reasoning, max effort) — cross-checked 2026-10-05 (artificialanalysis.ai)"
+    },
+    {
+      "provider": "deepseek",
+      "model": "deepseek-v4-pro",
+      "capability": 36,
+      "price": {
+        "input": 1.32,
+        "output": 3.96
+      },
+      "estimated": true,
+      "note": "AA page reports the index as not publicly available; search snapshot points to V4-Pro-0813 (max effort) = 36 — matches the existing openrouter ~deepseek/deepseek-pro-latest entry, but needs a manual check (2026-10-05)"
     }
   ]
 }
