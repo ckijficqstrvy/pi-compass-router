@@ -13,14 +13,18 @@
 > 可行集內排序項。
 > 實測 deepseek-v4.1-flash 30 個上游最便宜健康價 $0.09/$0.18 vs 摘要價 $0.3/$1.2。
 >
-> **S3（目標函數）資料受限**：需要各模型的 coding/agentic 分數（AA），目前未蒐集；
-> 在只有 intelligence 的情況下它與 S2 等價。
+> **S3（目標函數）資料受限——實查後建議暫緩**：AA 的「Intelligence Index」與
+> 「Coding Index」「Agentic Index」「Coding Agent Index」是**不同指標、不同尺度**
+> （實測：kimi-k3 Coding Index 76.2 / Agentic ~50 / Coding Agent 52；grok Coding Agent 56；
+> deepseek-v4.1-flash Intelligence 39；glm-5.3 Intelligence 60），且名稱與 harness
+> 不一致、覆蓋不全。把它們混成一個向量去比門檻＝拿不同尺度硬比，違反 facts 檔
+> 「never auto-guessed」。在有一致的分數來源（或自建 eval）前，S3 不應基於這些數字建置。
 >
-> **OR 上游選擇：可行但屬 pi 層**。pi 的 model config 支援 `openRouterRouting`
-> （`sort: {by:"price"}` / `order` / `only` / `ignore` / `max_price` / `zdr` …），
-> 這是**模型層設定（models.json）**，而 compass 每回合只能用 `setModel(provider,id)`——
-> 所以要在 OpenRouter 真正鎖到最便宜上游，得在 pi 的 models.json 對那些 model 設
-> routing 偏好（靜態），不是 compass runtime 能做的。
+> **OR 上游選擇：已用 pi 層 `models.json` 做**。pi 的 `modelOverrides.<id>.openRouterRouting`
+> 可設 `sort/order/only/ignore/max_price/zdr`（`ProviderConfigSchema` 的
+> `modelOverrides` 不替換 provider 模型清單）。已對 facts 內的 17 個 openrouter model
+> 設 `sort: {by:"price"}`。**代價**：最便宜上游可能每輸不同 → 犧牲 prompt cache；
+> 若不划算應改用 `max_price`/`order` 而非 `sort: price`。
 
 ## 1. 問題：三個不同的東西被擠在同一張表
 
