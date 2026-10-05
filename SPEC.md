@@ -206,6 +206,7 @@ pi-compass 是一個 pi 擴充，在每一輪對話**開始之前**判斷該用�
 | `prefer` | `Partial<Record<Tier, string[]>>` | `{}` | 插入鏈首，**絕不被過濾**。條目是**裸 model id**（可含 `/`，如 `xiaomi/mimo-v2.6-pro`）：解析先找 registry 唯一同 id，再退回 `provider/model` 拆解（2026-10-03 N2） |
 | `autoRoutes` | boolean | `true` | 用 model-facts 推導未寫的層級 |
 | `modelPick` | `off｜menu` | `off` | `menu` → 分類器多答一題選具體模型 |
+| `selection` | `bands｜registry` | `bands` | 候選來源（S2，2026-10-05）：`bands` = 現行價格帶推導；`registry` = 由 pi registry 全體建可行集（能力查 canonical、價格取健康 endpoint 中位數）。registry 無可行集時退回 bands |
 | `allowUnratedPicks` | boolean | `false` | 允許未評分模型中選 |
 | `freeOnly` | boolean | `false` | 特殊情境：只用 $0 模型 |
 | `strictFreeOnly` | boolean | `false` | freeOnly 的硬保證：沒有可驗證的 $0 模型時不回退付費，改為無路由（顯式 prefer 仍勝出） |
@@ -914,7 +915,8 @@ pressure = max(today÷dailyUsd, month÷monthlyUsd)
   "source": "string",
   "models": [
     { "provider": "openrouter", "model": "string",
-      "capability": number,
+      "canonical": string?,   // 能力是**模型**級：同模型跨 provider/別名共用一個身分（缺省由 canonicalOf 推導）
+      "capability": { "intelligence": number, "coding": number?, "agentic": number? },
       "price": { "input": number, "output": number },
       "estimated": bool?, "note": string? }
   ]
@@ -922,8 +924,16 @@ pressure = max(today÷dailyUsd, month÷monthlyUsd)
 ```
 
 函式面（沿用 `facts.ts` 原創實作）：
-`factsValid()`、`factFor(provider, id)`、`rankedFacts()`、
-`blendedOf(price)`、`sliceBands(ranked, ceilings)`。
+`factsValid()`、`factFor(provider, id)`、`rankedFacts()`、`primaryCapability()`（排序與
+門檻暫用 `intelligence`，S3 才改目標函數）、`blendedOf(price)`、`sliceBands(ranked, ceilings)`。
+
+（S2，2026-10-05）`policy/routes.ts` + `policy/candidates.ts`：把「能力＝模型級、價格＝
+route/endpoint 級」拆開。`canonicalOf()` 統一身分；`bestEndpoint()` 選最便宜且健康的
+OpenRouter 上游；`medianHealthyPrice()` 供預估成本；`registryChain()` 由 pi registry 全體
+建可行集（政策/冷卻/能力下限/價格天花板，能力降、價升，上限 25 並去重）。
+`selection: "registry"` 時 `selectTargets` 改用可行集（無提供則退回 bands）；預設 `bands`
+行為不變。`refresh-facts` 另外快取 OpenRouter 各模型 endpoint 報價到
+`~/.pi/agent/pi-compass/openrouter-endpoints.json`。
 
 `refresh-facts`：`npm run refresh-facts`（`-- --dry-run` 預覽）；
 價格**OpenRouter 公開 API 優先，其次保留既存值，最後才是 pi catalogue**
@@ -1547,5 +1557,8 @@ pi-compass/
 | 15 | `accept.sh` 第 3 項去耦供應商可用性：只把 `Failed to load extension` 判失敗，供應商 402／斷線視為載入成功（gate 不再因帳務/網路變紅） | Part 12 |
 | 16 | facts 加入原生 `deepseek` 的 `deepseek-flash`（cap 39）；openrouter 舊 slug `deepseek/deepseek-v4-flash`（0423 世代）更正為 `deepseek/deepseek-v4.1-flash`；被支配的 `~deepseek/deepseek-pro-latest`（= V4 Pro 0813）與原生 `deepseek-v4-pro` 不列。配合 `allowProviders` 含 deepseek，同一 V4.1 Flash 可跨 provider 備援 | Part 9 |
 | 17 | `refresh-facts` 價格決策修正：API 取不到時**保留既存價**，不用 catalogue 快照覆蓋（只在事實還沒價格時才由 catalogue 填）；新增 `--no-api` 供決定性測試。防同一筆價格在 API 價與 catalogue 價之間來回跳、使 band 飄移 | Part 9 |
+| 18 | **能力向量化**：`capability` 由 number 改為 `{intelligence, coding?, agentic?}`；未核對的維度省略（不猜）。band/門檻排序暫用 `primaryCapability()=intelligence`，行為不變 | Part 9 |
+| 19 | **canonical 身分 + route/endpoint（S1/S1b）**：新增 `policy/routes.ts`（`canonicalOf`/`bestEndpoint`/`capabilityByCanonical`/`buildRoutes`）；`facts` 加選配 `canonical`。能力是模型級、價格是 route 級；同一模型跨 provider 共用分數。`refresh-facts` 快取 OpenRouter endpoints（實測 v4.1-flash 30 上游，最便宜健康 $0.09/$0.18 vs 摘要 $0.3/$1.2） | Part 9 |
+| 20 | **registry 可行集（S2）**：`selection: bands｜registry`（預設 bands）＋ `policy/candidates.ts`。`registry` 由 pi registry 全體建可行集（政策/冷卻/能力下限/中位數價格天花板，能力降價升，上限 25 並去重），接 `selectTargets`/`planTurn`；無可行集時退回 bands | Part 3.1、Part 9 |
 
 未做/排除：分類準確度評估集、npm 發佈；健康冷卻秒數仍為內建常數（B2，待有實測需求再開放）。
