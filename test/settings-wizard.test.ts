@@ -26,6 +26,7 @@ import {
   type WizardHooks,
 } from "../extensions/pi-compass-router/ui/wizard.js";
 import { cloudClassifierKeys, localCheckpoints, openRouterModelKeys } from "../extensions/pi-compass-router/ui/sources.js";
+import { CLEAR_OPTION } from "../extensions/pi-compass-router/ui/wizard/labels.js";
 import { setLang } from "../extensions/pi-compass-router/ui/wizard/i18n.js";
 import { DEFAULT_CONFIG, TIERS } from "../extensions/pi-compass-router/schema.js";
 import type { CompassConfig, ThinkingLevel } from "../extensions/pi-compass-router/schema.js";
@@ -964,6 +965,19 @@ test("顯示：suggest 分數檔可在選單指定（最小完整化）", async 
 
   assert.deepEqual(s.writes[0], ["suggest", { scoresFile: "/tmp/scores.json" }]);
   assert.equal(config.suggest.scoresFile, "/tmp/scores.json");
+});
+
+test("顯示：suggest 分數檔可清除（寫入 null = 刪除，回自動校準）", async () => {
+  const config = freshConfig({ suggest: { scoresFile: "/tmp/scores.json" } });
+  const s = scripted({
+    menu: ["⑤ 政策與過濾", "建議分數檔"],
+    answers: { "建議分數檔（/compass suggest 的來源）": CLEAR_OPTION },
+  });
+
+  await runSettingsWizard(config, s.hooks);
+
+  assert.deepEqual(s.writes[0], ["suggest", null]);
+  assert.equal(config.suggest.scoresFile, "", "cleared back to auto-calibration");
 });
 
 // ---------------------------------------------------------------------------

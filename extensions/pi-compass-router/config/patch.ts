@@ -109,7 +109,10 @@ export const PATCH_SCHEMA: Record<string, TSchema> = {
     { additionalProperties: false },
   ),
   specialistPriority: Type.Record(Type.String(), Type.Array(NonEmpty)),
-  suggest: Type.Object({ scoresFile: NonEmpty }, { additionalProperties: false }),
+  // `scoresFile: ""` 是**合法值**（= 未指定 → /compass suggest 改讀 decisions.jsonl
+  // 自動校準，SPEC Part 10.1、Part 3.1）。故不可用 NonEmpty；指定路徑時
+  // wizard 的自訂輸入會自行擋空字串，schema 不需再收窄。
+  suggest: Type.Object({ scoresFile: Type.String() }, { additionalProperties: false }),
   budget: Type.Object(
     {
       dailyUsd: Type.Optional(Type.Union([NonNeg, Type.Null()])),

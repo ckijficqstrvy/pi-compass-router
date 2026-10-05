@@ -246,6 +246,17 @@ test("validatePatch rejects malformed values with a reason naming the key", () =
   reject("cache", { bogus: 1 }, /unknown setting/);
 });
 
+test("suggest.scoresFile \"\" is a legitimate value and raises no warning", () => {
+  const { path, cleanup } = withTempConfig({ suggest: { scoresFile: "" } });
+  try {
+    const { config, warnings } = loadConfig(NO_ENV, { filePath: path });
+    assert.deepStrictEqual(warnings, [], `unexpected warnings: ${JSON.stringify(warnings)}`);
+    assert.equal(config.suggest.scoresFile, "");
+  } finally {
+    cleanup();
+  }
+});
+
 test("validatePatch accepts well-formed values", () => {
   assert.equal(validatePatch("enabled", false), null);
   assert.equal(validatePatch("mode", "auto"), null);
@@ -257,6 +268,9 @@ test("validatePatch accepts well-formed values", () => {
   assert.equal(validatePatch("freePool", { enabled: true }), null);
   assert.equal(validatePatch("ceilings", { quick: null }), null);
   assert.equal(validatePatch("thinking", { plan: "max" }), null);
+  // suggest.scoresFile 的空字串是「未指定／自動校準」的合法值（Part 10.1）。
+  assert.equal(validatePatch("suggest", { scoresFile: "" }), null);
+  assert.equal(validatePatch("suggest", { scoresFile: "/tmp/scores.json" }), null);
   assert.equal(validatePatch("classify", { provider: "laya", timeoutMs: 400 }), null);
 });
 

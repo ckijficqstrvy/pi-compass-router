@@ -666,6 +666,13 @@ const NULL_IS_VALUE_SUBKEYS: ReadonlySet<string> = new Set([
  */
 function applyPatchToFile(file: Record<string, unknown>, patch: Record<string, unknown>): void {
   for (const [key, value] of Object.entries(patch)) {
+    // 頂層 `null` = 刪除該鍵（回預設／回自動派生，Part 3.4 契約）。先前這裡會落到
+    // else 分支寫成字面上的 `"suggest": null`，使下次載入噴驗證警告（2026-10-05）。
+    // 沒有任何頂層鍵以 null 為「值」——budget 的 null 是**子鍵**，在下方合併分支處理。
+    if (value === null) {
+      delete file[key];
+      continue;
+    }
     if (OBJECT_MERGE_KEYS.has(key) && isRecord(value)) {
       const target = isRecord(file[key]) ? (file[key] as Record<string, unknown>) : (file[key] = {});
       for (const [sub, subValue] of Object.entries(value)) {

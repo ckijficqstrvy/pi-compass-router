@@ -1511,5 +1511,7 @@ push 與 pull_request 皆觸發。
 | 5 | `decisionWithinDays` 抽到 `decisions.ts`，`suggest` 與 `stats` 共用同一視窗邏輯（移除重複） | Part 10.1 |
 | 6 | 新增 `strictFreeOnly`（頂層布林，預設 `false`）：freeOnly 下沒有可驗證的 $0 模型時**不回退付費**，改為無路由；顯式 prefer 仍勝出（L3） | Part 3.1、Part 9、Part 5 Stage 3 |
 | 7 | **事前**成本投影（C1）：`estimateTurnUsd`（context 當輸入 + `OUTPUT_TOKEN_ESTIMATE` 當輸出）在選定目標後估算本輪成本；若會觸及 hard ratio 則再降一層重選（只在重選有目標時採用），`budgetForced` 一併設真以豁免 deadband/cache | Part 8、Part 5 Stage 4 |
+| 8 | **走鐘修正**：`suggest.scoresFile` 的 schema 由 `NonEmpty` 改為 `String`——空字串是 Part 10.1 定義的「未指定→自動校準」合法值，舊 schema 會誤報 `suggest needs {scoresFile: string}` 並忽略整塊 | Part 3.1、Part 10.1、Part 3.4 |
+| 9 | **走鐘修正**：`writeConfigPatch` 的頂層 `null` 現在真的**刪除該鍵**（先前落到 else 分支寫成字面 `"suggest": null`，使下次載入噴警告）；與 Part 3.4「null = 刪除」契約一致 | Part 3.4 |
 
 未做/排除：分類準確度評估集、npm 發佈；健康冷卻秒數仍為內建常數（B2，待有實測需求再開放）。

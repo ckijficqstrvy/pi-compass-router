@@ -139,3 +139,23 @@ test("null 刪除仍受白名單驗證保護：未知鍵照樣整筆拒", () => 
   assert.match(String(problem), /unknown setting/);
   assert.equal(readFileSync(path, "utf8"), before);
 });
+test("suggest.scoresFile 空字串可寫入且載入無警告（Part 10.1 的「自動校準」值）", () => {
+  const path = freshFile({ mode: "notify" });
+  const problem = writeConfigPatch({ suggest: { scoresFile: "" } }, path);
+  assert.equal(problem, null);
+  assert.deepEqual(readJson(path).suggest, { scoresFile: "" });
+  const { config, warnings } = loadConfig({}, { filePath: path });
+  assert.deepStrictEqual(warnings, []);
+  assert.equal(config.suggest.scoresFile, "");
+});
+
+test("suggest 給頂層 null = 刪除該鍵（不落字面 null，載入無警告）", () => {
+  const path = freshFile({ mode: "notify", suggest: { scoresFile: "/tmp/scores.json" } });
+  const problem = writeConfigPatch({ suggest: null }, path);
+  assert.equal(problem, null);
+  const written = readJson(path);
+  assert.ok(!("suggest" in written), "the key is removed, not left as a literal null");
+  const { config, warnings } = loadConfig({}, { filePath: path });
+  assert.deepStrictEqual(warnings, []);
+  assert.equal(config.suggest.scoresFile, "");
+});
