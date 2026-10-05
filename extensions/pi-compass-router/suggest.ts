@@ -2,7 +2,7 @@
 //（SPEC Part 10.1「分數檔格式」節、移植 #12；決策日誌自動校準 2026-10-03）。
 import { readFileSync } from "node:fs";
 import { decisionWithinDays, readDecisions, type DecisionRecord } from "./decisions.js";
-import { MODEL_FACTS, factsValid, factFor } from "./policy/facts.js";
+import { MODEL_FACTS, factsValid, factFor, primaryCapability } from "./policy/facts.js";
 import { TIERS, TIER_CAPABILITY_FLOOR, type CompassConfig, type Target, type Tier } from "./schema.js";
 import { selectTargets } from "./route/select.js";
 import { targetFromKey } from "./target.js";
@@ -190,13 +190,13 @@ function deriveTier(key: string, config: CompassConfig): Tier | undefined {
   // 找到「能力下限 ≤ 它」的最高可行層（用 Stage 3 同一條鏈驗證在帶內）。
   for (let i = TIERS.length - 1; i >= 0; i -= 1) {
     const tier = TIERS[i];
-    if (fact.capability < TIER_CAPABILITY_FLOOR[tier]) continue;
+    if (primaryCapability(fact.capability) < TIER_CAPABILITY_FLOOR[tier]) continue;
     const { chain } = selectTargets(tier, undefined, config);
     if (chain.some((target) => target.model === want.model && (!want.provider || target.provider === want.provider))) {
       return tier;
     }
   }
   // 能力夠但帶不符（例如價格超 ceiling）→ 落到最低可行層。
-  return TIERS.find((tier) => fact.capability >= TIER_CAPABILITY_FLOOR[tier]);
+  return TIERS.find((tier) => primaryCapability(fact.capability) >= TIER_CAPABILITY_FLOOR[tier]);
 }
 

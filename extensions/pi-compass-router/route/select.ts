@@ -1,5 +1,5 @@
 // route/select.ts — Stage 3：候選鏈組裝（SPEC Part 5：專家 → 層級 → 池）。
-import { MODEL_FACTS, blendedOf, factFor, factsValid, rankedFacts } from "../policy/facts.js";
+import { MODEL_FACTS, blendedOf, factFor, factsValid, primaryCapability, rankedFacts } from "../policy/facts.js";
 import { ceilingFor, filterChain } from "../policy/filter.js";
 import { TIERS, TIER_CAPABILITY_FLOOR, type CompassConfig, type Target, type Tier } from "../schema.js";
 import type { Judgment } from "../classify/types.js";
@@ -97,8 +97,9 @@ function menuGate(key: string, tier: Tier, config: CompassConfig, target: Target
   if (fact) {
     // 閘 4 capability ≥ 該層下限。
     const floor = TIER_CAPABILITY_FLOOR[tier];
-    if (fact.capability < floor) {
-      return `capability ${fact.capability} below floor ${floor}`;
+    const capability = primaryCapability(fact.capability);
+    if (capability < floor) {
+      return `capability ${capability} below floor ${floor}`;
     }
     // 閘 5 價格在該層價格帶內（profile/ceilings 生效值）。
     if (fact.price) {
@@ -166,10 +167,16 @@ function dedupeChain(chain: readonly Target[]): Target[] {
   return out;
 }
 
+export interface SelectExtras {
+  /** S2 registry 模式：呼叫端提供、已排序的可行集（`registryChain()`）。 */
+  registryChain?: Target[];
+}
+
 export function selectTargets(
   tier: Tier,
   judgment: Judgment | undefined,
   config: CompassConfig,
+  extras?: SelectExtras,
 ): SelectResult {
   const notes: string[] = [];
 
@@ -209,8 +216,13 @@ export function selectTargets(
     chain.push(...orderSpecialists(eligible, judgment.kind, config));
   }
 
-  // 2. 層級鏈。
-  chain.push(...config.routes[tier]);
+  // 2. 層級鏈：`selection: "registry"`（S2）用可行集；否則沿用價格帶推導的 routes。
+  //    registry 模式若呼叫端沒給可行集（例如 suggest 的探索），退回 bands，不中斷。
+  if (config.selection === "registry" && extras?.registryChain) {
+    chain.push(...extras.registryChain);
+  } else {
+    chain.push(...config.routes[tier]);
+  }
 
   // 3. freePool 僅在當前層無候選時進場（移植 #3：池外免費模型是兕底，不是競品）。
   if (chain.length === 0 && config.freePool.enabled && config.freePool.models.length > 0) {

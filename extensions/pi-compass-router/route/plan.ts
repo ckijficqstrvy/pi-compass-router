@@ -45,6 +45,8 @@ export interface PlanDeps {
   isAvailable(target: Target): boolean;
   /** 目標模型的費率；未知回 null。 */
   costOf(target: Target): CostRates | null;
+  /** S2：`selection: "registry"` 時，由呼叫端注入該層可行集（未提供則退回 bands）。 */
+  registryChain?: (tier: Tier, judgment: Judgment | undefined) => Target[] | undefined;
 }
 
 /** Stage 2–4 的計畫結果。 */
@@ -128,7 +130,9 @@ export function planTurn(
   // 過期；未知價格不擋（fail-open）。
   // N3（複審）：預算降級後要用**有效層級**的天花板，否則會放過超 quick 價的候選。
   const pickFor = (tier: Tier): { target?: Target; notes: string[] } => {
-    const selected = selectTargets(tier, judgment, config);
+    const selected = selectTargets(tier, judgment, config, {
+      registryChain: deps.registryChain?.(tier, judgment),
+    });
     const ceiling = ceilingFor(config, tier);
     const priceOk = (candidate: Target): boolean => {
       // Part 9 L3：顯式條目（使用者自己寫的）永不被政策過濾——價格天花板也一樣。

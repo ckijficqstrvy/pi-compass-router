@@ -25,8 +25,12 @@ export interface ModelFact {
   /** pi 的 catalogue 認得的可路由模型 id（別名亦可）。 */
   model: string;
   provider: string;
-  /** 能力快照（分數越高越強），人工核對。 */
-  capability: number;
+  /** 能力是**模型**的屬性（canonical，provider 無關）：同一模型在不同 provider/別名
+   *  下共用一個身分與分數，才不會出現「只比較 openrouter 分數」。缺省時由
+   *  `canonicalOf()` 推導（openrouter 的 slug 已是 `maker/model`）。 */
+  canonical?: string;
+  /** 能力快照（多維；見 ModelCapability）。 */
+  capability: ModelCapability;
   /** 快照時點的目錄牌價，USD / 百萬 token。可選：缺價的模型不會被切帶。 */
   price?: { input: number; output: number };
   /** 能力分數是估計值，不是實測條目。 */
@@ -38,6 +42,24 @@ export interface FactsFile {
   generatedAt: string;
   source: string;
   models: ModelFact[];
+}
+
+/**
+ * 模型能力是**多維**的（Artificial Analysis 分不同 index），且各維尺度不同、
+ * 不可互換。未核對的維度一律省略，腳本與人工都不猜。
+ */
+export interface ModelCapability {
+  /** AA Intelligence Index：headline 分數；band 內排序與 tier 門檻比較用它。 */
+  intelligence: number;
+  /** AA Coding Index（未核對則省略）。 */
+  coding?: number;
+  /** AA Agentic Index（未核對則省略）。 */
+  agentic?: number;
+}
+
+/** 既有 band 排序與 tier 門檻在 S3 之前仍用 `intelligence` 當主分數。 */
+export function primaryCapability(capability: ModelCapability): number {
+  return capability.intelligence;
 }
 
 /**
@@ -62,14 +84,27 @@ export function factsValid(value: unknown): value is FactsFile {
       typeof m.model === "string" &&
       m.model.length > 0 &&
       typeof m.provider === "string" &&
-      typeof m.capability === "number" &&
-      Number.isFinite(m.capability) &&
+      (m.canonical === undefined || (typeof m.canonical === "string" && m.canonical.length > 0)) &&
+      isModelCapability(m.capability) &&
       (m.price === undefined ||
         (!!m.price &&
           typeof m.price.input === "number" &&
           typeof m.price.output === "number" &&
           m.price.input >= 0 &&
           m.price.output >= 0)),
+  );
+}
+
+/** 能力物件校驗：intelligence 必填且有限；coding/agentic 有則必須有限。 */
+function isModelCapability(value: unknown): value is ModelCapability {
+  if (typeof value !== "object" || value === null) return false;
+  const cap = value as Record<string, unknown>;
+  const finite = (n: unknown): boolean => typeof n === "number" && Number.isFinite(n);
+  return (
+    finite(cap.intelligence) &&
+    (cap.intelligence as number) >= 0 &&
+    (cap.coding === undefined || finite(cap.coding)) &&
+    (cap.agentic === undefined || finite(cap.agentic))
   );
 }
 
@@ -86,9 +121,11 @@ export function factFor(provider: string, id: string): ModelFact | undefined {
   return matches.length === 1 ? matches[0] : undefined;
 }
 
-/** 依能力降序；同分保持檔案順序（穩定，重刷不會洗牌）。 */
+/** 依主分數（intelligence）降序；同分保持檔案順序（穩定，重刷不會洗牌）。 */
 export function rankedFacts(facts: FactsFile): ModelFact[] {
-  return [...facts.models].sort((a, b) => b.capability - a.capability);
+  return [...facts.models].sort(
+    (a, b) => primaryCapability(b.capability) - primaryCapability(a.capability),
+  );
 }
 
 /**

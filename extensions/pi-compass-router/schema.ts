@@ -29,6 +29,10 @@ export const PROFILES: readonly Profile[] = ["cheap", "balanced", "quality"];
 export type ModelPickMode = "off" | "menu";
 export const MODEL_PICKS: readonly ModelPickMode[] = ["off", "menu"];
 
+/** 候選來源（S2）：`bands` = 現行價格帶推導；`registry` = 由 pi registry 全體可行集。 */
+export type SelectionMode = "bands" | "registry";
+export const SELECTIONS: readonly SelectionMode[] = ["bands", "registry"];
+
 /** 思考層級（Part 3.1 `thinkingLevel` 可能值）。 */
 export type ThinkingLevel =
   | "off"
@@ -200,6 +204,8 @@ export interface CompassConfig {
   prefer: Partial<Record<Tier, string[]>>;
   autoRoutes: boolean;
   modelPick: ModelPickMode;
+  /** 候選來源：`bands`（預設，現行）或 `registry`（S2，registry 全體可行集）。 */
+  selection: SelectionMode;
   allowUnratedPicks: boolean;
   freeOnly: boolean;
   /** freeOnly 的硬保證（opt-in）：沒有可驗證的 $0 模型時不回退付費，改為無路由。 */
@@ -353,6 +359,7 @@ export const DEFAULT_CONFIG: CompassConfig = {
   prefer: {},
   autoRoutes: true,
   modelPick: "off",
+  selection: "bands",
   allowUnratedPicks: false,
   freeOnly: false,
   strictFreeOnly: false,

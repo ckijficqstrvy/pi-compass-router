@@ -334,7 +334,7 @@ test("ceilingFor prefers an explicit ceiling over the profile table", () => {
 test("factFor resolves the facts used by the gate", () => {
   const fact = factFor("openrouter", "~x-ai/grok-latest");
   assert.ok(fact, "grok-latest must be in the facts file");
-  assert.ok(fact.capability >= 38, "grok capability clears the high floor");
+  assert.ok(fact.capability.intelligence >= 38, "grok capability clears the high floor");
 });
 test("factFor never borrows another provider's fact (W8 regression)", () => {
   // 取一個真實 facts 條目，用錯的 provider 查 → 必須 undefined（不再跨 provider 誤配）。

@@ -16,6 +16,7 @@ import {
   MODEL_PICKS,
   MODES,
   PROFILES,
+  SELECTIONS,
   PROVIDERS,
   THINKING_LEVELS,
   TIERS,
@@ -61,6 +62,7 @@ export const PATCH_SCHEMA: Record<string, TSchema> = {
   advanced: Type.Boolean(),
   mode: literalUnion(MODES),
   modelPick: literalUnion(MODEL_PICKS),
+  selection: literalUnion(SELECTIONS),
   profile: literalUnion(PROFILES),
   classify: Type.Object(
     {

@@ -11,6 +11,7 @@ import { Value } from "typebox/value";
 import {
   MODES,
   MODEL_PICKS,
+  SELECTIONS,
   PROFILES,
   PROVIDERS,
   THINKING_LEVELS,
@@ -253,6 +254,10 @@ function applyFilePatch(
       case "modelPick":
         if (inSet(value, MODEL_PICKS)) next.modelPick = value as CompassConfig["modelPick"];
         else warnings.push(`config.json: modelPick must be one of ${MODEL_PICKS.join("|")} — ignored`);
+        break;
+      case "selection":
+        if (inSet(value, SELECTIONS)) next.selection = value as CompassConfig["selection"];
+        else warnings.push(`config.json: selection must be one of ${SELECTIONS.join("|")} — ignored`);
         break;
       case "profile":
         if (inSet(value, PROFILES)) next.profile = value as CompassConfig["profile"];
