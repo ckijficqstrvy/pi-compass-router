@@ -55,6 +55,7 @@ export const PATCH_SCHEMA: Record<string, TSchema> = {
   autoRoutes: Type.Boolean(),
   allowUnratedPicks: Type.Boolean(),
   freeOnly: Type.Boolean(),
+  strictFreeOnly: Type.Boolean(),
   stickiness: Type.Boolean(),
   decisionLog: Type.Boolean(),
   advanced: Type.Boolean(),

@@ -202,6 +202,8 @@ export interface CompassConfig {
   modelPick: ModelPickMode;
   allowUnratedPicks: boolean;
   freeOnly: boolean;
+  /** freeOnly 的硬保證（opt-in）：沒有可驗證的 $0 模型時不回退付費，改為無路由。 */
+  strictFreeOnly: boolean;
   stickiness: boolean;
   cache: SwitchCacheConfig;
   thinking: ThinkingConfig;
@@ -353,6 +355,7 @@ export const DEFAULT_CONFIG: CompassConfig = {
   modelPick: "off",
   allowUnratedPicks: false,
   freeOnly: false,
+  strictFreeOnly: false,
   stickiness: true,
   cache: {
     aware: true,

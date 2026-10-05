@@ -89,8 +89,8 @@ test("tier tables match SPEC Part 5 / Stage 3 / Part 9", () => {
 
 test("COMPASS_ENV_MAP covers SPEC Part 3.3 keys", () => {
   const keys = Object.keys(COMPASS_ENV_MAP);
-  assert.equal(keys.length, 28);
-  for (const name of ["COMPASS_ENABLED", "COMPASS_MODE", "COMPASS_PROFILE", "COMPASS_KIND_MIN_TIER"]) {
+  assert.equal(keys.length, 29);
+  for (const name of ["COMPASS_ENABLED", "COMPASS_MODE", "COMPASS_PROFILE", "COMPASS_KIND_MIN_TIER", "COMPASS_STRICT_FREE_ONLY"]) {
     assert.ok(name in COMPASS_ENV_MAP, `缺少 ${name}`);
   }
   assert.ok(keys.every((k) => k.startsWith("COMPASS_")));

@@ -20,7 +20,7 @@ type GroupEditor = (
 
 const GROUP_EDITORS: ReadonlyArray<readonly [readonly MenuItem[], GroupEditor]> = [
   [["enabled", "mode", "advanced", "stickiness", "modelPick", "allowUnratedPicks", "thinking", "cache"], editRouting],
-  [["daily", "monthly", "ratios", "profile", "freeOnly"], editBudget],
+  [["daily", "monthly", "ratios", "profile", "freeOnly", "strictFreeOnly"], editBudget],
   [["chains", "kindModels", "prefer", "kindTiers", "xpremium", "useDefaultModels"], editModels],
   [["provider", "checkpoint", "classifyCache", "classifyNums"], editClassifier],
   [["filters", "ceilings", "scoresFile"], editPolicy],

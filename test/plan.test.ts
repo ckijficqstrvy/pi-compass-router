@@ -363,3 +363,48 @@ test("runtime price ceiling uses the effective (post-budget) tier (N3)", () => {
   );
   assert.equal(plan.unavailable, true, "over-quick-ceiling candidate is rejected");
 });
+
+test("C1: a turn that would cross the hard cap is downgraded before it happens", () => {
+  const cheap: CostRates = { input: 0.1, output: 0.1, cacheRead: 0, cacheWrite: 0 };
+  const pricey: CostRates = { input: 20, output: 20, cacheRead: 0, cacheWrite: 0 };
+  const config = configWith({
+    budget: { dailyUsd: 1, monthlyUsd: null, softRatio: 0.95, hardRatio: 0.9 },
+    // 拿掉價格天花板，讓 projection（而非 ceiling）成為唯一降級原因。
+    ceilings: { standard: null, quick: null },
+  });
+  const plan = planTurn(
+    judgmentFor(1.9),
+    config,
+    // 已花 $0.85（soft < 0.85 < hard 0.9，applyBudget 不動），但這一輪的代價會爆表。
+    snapshotWith({ currentModel: "openrouter/other", currentTier: null, contextTokens: 100_000, todayUsd: 0.85 }),
+    { isAvailable: () => true, costOf: (t) => (t.model === "standard-model" ? pricey : cheap) },
+  );
+  assert.equal(plan.target?.model, "quick-model", "downgraded to the cheap chain before crossing the cap");
+  assert.equal(plan.guard?.tier, "quick");
+  assert.match(String(plan.guard?.reason), /projected next turn/);
+});
+
+test("C1: a small projected turn does not downgrade", () => {
+  const cheap: CostRates = { input: 0.1, output: 0.1, cacheRead: 0, cacheWrite: 0 };
+  const config = configWith({
+    budget: { dailyUsd: 100, monthlyUsd: null, softRatio: 0.7, hardRatio: 0.9 },
+  });
+  const plan = planTurn(
+    judgmentFor(1.9),
+    config,
+    snapshotWith({ currentModel: "openrouter/other", currentTier: null, contextTokens: 1000, todayUsd: 0 }),
+    { isAvailable: () => true, costOf: () => cheap },
+  );
+  assert.equal(plan.target?.model, "standard-model", "stays on the selected tier");
+});
+
+test("C1: unknown rates skip the projection (fail-open)", () => {
+  const config = configWith({ budget: { dailyUsd: 1, monthlyUsd: null, softRatio: 0.95, hardRatio: 0.9 } });
+  const plan = planTurn(
+    judgmentFor(1.9),
+    config,
+    snapshotWith({ currentModel: "openrouter/other", currentTier: null, contextTokens: 100_000, todayUsd: 0.85 }),
+    { isAvailable: () => true, costOf: () => null },
+  );
+  assert.equal(plan.target?.model, "standard-model", "no rates → no projection, no downgrade");
+});

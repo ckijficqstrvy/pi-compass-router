@@ -121,6 +121,12 @@ export async function editBudget(
       const freeOnly = picked === "開";
       return simpleEdit("freeOnly", freeOnly, { freeOnly });
     }
+    case "strictFreeOnly": {
+      const picked = await pickFrom(hooks, t("free-only 嚴格（不付費）"), ["開", "關"]);
+      if (picked === undefined || picked === null) return picked;
+      const strictFreeOnly = picked === "開";
+      return simpleEdit("strictFreeOnly", strictFreeOnly, { strictFreeOnly });
+    }
     default:
       return null;
   }

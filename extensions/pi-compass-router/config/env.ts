@@ -27,6 +27,7 @@ export const COMPASS_ENV_MAP: Readonly<Record<string, string>> = {
   COMPASS_MODEL_PICK: "modelPick",
   COMPASS_ALLOW_UNRATED_PICKS: "allowUnratedPicks",
   COMPASS_FREE_ONLY: "freeOnly",
+  COMPASS_STRICT_FREE_ONLY: "strictFreeOnly",
   COMPASS_FREE_POOL: "freePool.enabled",
   COMPASS_XPREMIUM: "xpremium.enabled",
   COMPASS_CACHE_AWARE: "cache.aware",
@@ -54,6 +55,7 @@ export interface EnvPatch {
   modelPick?: CompassConfig["modelPick"];
   allowUnratedPicks?: boolean;
   freeOnly?: boolean;
+  strictFreeOnly?: boolean;
   profile?: CompassConfig["profile"];
   classify?: Partial<Omit<CompassConfig["classify"], "cloud">>;
   budget?: {
@@ -222,6 +224,7 @@ const ENV_VARS: readonly EnvVarSpec[] = [
   },
   BOOL_SPEC("allowUnratedPicks"),
   BOOL_SPEC("freeOnly"),
+  BOOL_SPEC("strictFreeOnly"),
   {
     path: "profile",
     expected: "cheap, balanced, or quality",

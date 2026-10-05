@@ -583,6 +583,7 @@ const VALID_SAMPLES: ReadonlyArray<{ key: string; value: unknown }> = [
   { key: "autoRoutes", value: true },
   { key: "allowUnratedPicks", value: true },
   { key: "freeOnly", value: true },
+  { key: "strictFreeOnly", value: true },
   { key: "decisionLog", value: false },
   { key: "advanced", value: true },
   { key: "classify", value: { timeoutMs: 100 } },

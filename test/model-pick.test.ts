@@ -179,6 +179,31 @@ test("freeOnly keeps explicit prefer entries (L3 beats L2 policy)", () => {
   assert.equal(chain[0]?.explicit, true);
 });
 
+test("strictFreeOnly turns the paid fallback into no route (C4)", () => {
+  const cfg = config({
+    freeOnly: true,
+    strictFreeOnly: true,
+    freePool: { enabled: false, models: [] },
+    routes: { ...config().routes, high: [{ provider: "openrouter", model: "paid" }] },
+    kindModels: {},
+  });
+  const { chain, notes } = selectTargets("high", undefined, cfg);
+  assert.deepEqual(chain, [], "no verified $0 model and no freePool → empty chain");
+  assert.ok(notes.some((note) => note.includes("strictFreeOnly")), "the reason is recorded");
+});
+
+test("strictFreeOnly still honours explicit prefer entries (L3)", () => {
+  const cfg = config({
+    freeOnly: true,
+    strictFreeOnly: true,
+    prefer: { high: ["my/preferred"] },
+    kindModels: {},
+    routes: { ...config().routes, high: [] },
+  });
+  const { chain } = selectTargets("high", undefined, cfg);
+  assert.equal(chain[0]?.model, "my/preferred", "explicit prefer survives strict free-only");
+});
+
 // ---------------------------------------------------------------------------
 // menu 六道閘
 // ---------------------------------------------------------------------------

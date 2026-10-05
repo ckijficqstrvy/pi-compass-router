@@ -208,6 +208,7 @@ pi-compass 是一個 pi 擴充，在每一輪對話**開始之前**判斷該用�
 | `modelPick` | `off｜menu` | `off` | `menu` → 分類器多答一題選具體模型 |
 | `allowUnratedPicks` | boolean | `false` | 允許未評分模型中選 |
 | `freeOnly` | boolean | `false` | 特殊情境：只用 $0 模型 |
+| `strictFreeOnly` | boolean | `false` | freeOnly 的硬保證：沒有可驗證的 $0 模型時不回退付費，改為無路由（顯式 prefer 仍勝出） |
 | `stickiness` | boolean | `true` | 當前已是目標 → 不切換 |
 | `decisionLog` | boolean | `true` | 決策日誌（非內容欄位）寫 `decisions.jsonl`；false 關閉 |
 | `advanced` | boolean | `false` | `/compass-set` 顯示工程師向設定（預設隱藏，2026-10-03） |
@@ -298,6 +299,7 @@ hardRatio 的 `demand ≥ 2.5` 例外；層級 floor 直接決定候選鏈起點
 | `COMPASS_MODEL_PICK` | `modelPick` |
 | `COMPASS_ALLOW_UNRATED_PICKS` | `allowUnratedPicks` |
 | `COMPASS_FREE_ONLY` | `freeOnly` |
+| `COMPASS_STRICT_FREE_ONLY` | `strictFreeOnly` |
 | `COMPASS_FREE_POOL` | `freePool.enabled` |
 | `COMPASS_XPREMIUM` | `xpremium.enabled` |
 | `COMPASS_CACHE_AWARE` | `cache.aware` |
@@ -1507,5 +1509,7 @@ push 與 pull_request 皆觸發。
 | 3 | 健康檔 `health.json` 寫入改用與帳本共用的跨行程鎖 + 原子寫（`lock.ts`；budget 同步改用同一支） | Part 8.4 |
 | 4 | 全部候選都在冷卻時，skipped entry 明確寫 `all candidates cooling down; keeping current model`，並以 UI 警告說明 | Part 8.4、Part 5 Stage 5 |
 | 5 | `decisionWithinDays` 抽到 `decisions.ts`，`suggest` 與 `stats` 共用同一視窗邏輯（移除重複） | Part 10.1 |
+| 6 | 新增 `strictFreeOnly`（頂層布林，預設 `false`）：freeOnly 下沒有可驗證的 $0 模型時**不回退付費**，改為無路由；顯式 prefer 仍勝出（L3） | Part 3.1、Part 9、Part 5 Stage 3 |
+| 7 | **事前**成本投影（C1）：`estimateTurnUsd`（context 當輸入 + `OUTPUT_TOKEN_ESTIMATE` 當輸出）在選定目標後估算本輪成本；若會觸及 hard ratio 則再降一層重選（只在重選有目標時採用），`budgetForced` 一併設真以豁免 deadband/cache | Part 8、Part 5 Stage 4 |
 
-未做（本輪明示排除）：分類準確度評估集、npm 發佈。
+未做/排除：分類準確度評估集、npm 發佈；健康冷卻秒數仍為內建常數（B2，待有實測需求再開放）。

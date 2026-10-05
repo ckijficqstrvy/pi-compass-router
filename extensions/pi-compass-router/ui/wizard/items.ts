@@ -42,6 +42,7 @@ export type MenuItem =
   | "ratios"
   | "profile"
   | "freeOnly"
+  | "strictFreeOnly"
   | "chains"
   | "kindModels"
   | "prefer"
@@ -68,7 +69,7 @@ export type MenuItem =
 
 export const GROUP_ITEMS: Readonly<Record<Group, readonly MenuItem[]>> = {
   routing: ["enabled", "mode", "advanced", "stickiness", "modelPick", "allowUnratedPicks", "thinking", "cache"],
-  budget: ["daily", "monthly", "ratios", "profile", "freeOnly"],
+  budget: ["daily", "monthly", "ratios", "profile", "freeOnly", "strictFreeOnly"],
   models: ["chains", "kindModels", "prefer", "kindTiers", "xpremium", "useDefaultModels"],
   classifier: ["provider", "checkpoint", "classifyCache", "classifyNums"],
   policy: ["filters", "ceilings", "scoresFile"],
@@ -91,6 +92,7 @@ export const ITEM_NAMES: Readonly<Record<MenuItem, string>> = {
   ratios: "預算警戒線",
   profile: "價格 profile",
   freeOnly: "特殊情境（free-only）",
+  strictFreeOnly: "free-only 嚴格（不付費）",
   chains: "模型鏈",
   kindModels: "專家鏈",
   prefer: "prefer 首選",
@@ -119,7 +121,7 @@ export const ITEM_NAMES: Readonly<Record<MenuItem, string>> = {
 /** 工程師向項目：`advanced: false`（預設）時隱藏，只在「進階選項」開啟後出現。 */
 export const ADVANCED_ITEMS: ReadonlySet<MenuItem> = new Set([
   "stickiness", "modelPick", "allowUnratedPicks", "thinking", "cache",
-  "ratios", "freeOnly",
+  "ratios", "freeOnly", "strictFreeOnly",
   "chains", "kindModels", "prefer", "kindTiers", "xpremium", "useDefaultModels",
   "checkpoint", "classifyCache", "classifyNums",
   "filters", "ceilings", "scoresFile",
@@ -200,6 +202,8 @@ export function renderItemRow(item: MenuItem, config: CompassConfig): string {
       return `${name}${pad}${config.profile}`;
     case "freeOnly":
       return t`${name}${pad}${onOff(config.freeOnly)}（只用 $0 模型）`;
+    case "strictFreeOnly":
+      return t`${name}${pad}${onOff(config.strictFreeOnly)}（沒有可驗證的 $0 模型就不路由）`;
     case "chains":
       return `${name}${pad}quick ${chainSummary(config.routes.quick)} · high ${chainSummary(config.routes.high)}`;
     case "kindModels":

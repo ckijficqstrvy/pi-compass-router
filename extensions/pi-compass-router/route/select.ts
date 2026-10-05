@@ -185,6 +185,12 @@ export function selectTargets(
       (target) => !explicitHeads.some((head) => head.model === target.model),
     );
     if (fallbackChain.fallback === "paid") {
+      // C4（2026-10-05）：strictFreeOnly 是 opt-in 的**硬保證**——沒有可驗證的
+      // $0 模型時不再回退付費，改為無路由（顯式 prefer 仍勝出，Part 9 L3）。
+      if (config.strictFreeOnly) {
+        notes.push("strictFreeOnly: no verified $0 model — no route");
+        return { chain: explicitHeads, notes };
+      }
       notes.push("no verified $0 model — paid fallback (freeOnly is not a hard guarantee)");
     } else if (fallbackChain.fallback === "freePool") {
       notes.push("no verified $0 model — using freePool fallback");

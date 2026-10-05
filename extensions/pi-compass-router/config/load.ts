@@ -234,6 +234,7 @@ function applyFilePatch(
       case "autoRoutes":
       case "allowUnratedPicks":
       case "freeOnly":
+      case "strictFreeOnly":
       case "stickiness":
       case "decisionLog":
       case "advanced":
@@ -421,6 +422,7 @@ function applyEnvPatch(base: CompassConfig, patch: EnvPatch): CompassConfig {
     "modelPick",
     "allowUnratedPicks",
     "freeOnly",
+    "strictFreeOnly",
     "profile",
   ] as const) {
     const value = patch[key];

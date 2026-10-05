@@ -7,7 +7,8 @@
 // Stage 4 的 cache/cooldown 全程空轉而沒被發現（2026-10-03）。
 // 這裡改為：編排純函式（可注入 isAvailable / costOf），routeTurn 只做 I/O。
 import type { Judgment } from "../classify/types.js";
-import type { CompassConfig, Target, Tier } from "../schema.js";
+import { TIERS, type CompassConfig, type Target, type Tier } from "../schema.js";
+import { computePressure } from "../budget.js";
 import { compose, type ComposeResult } from "./compose.js";
 import { ceilingFor } from "../policy/filter.js";
 import { applyBudget, guard, type GuardResult } from "./guard.js";
@@ -80,6 +81,24 @@ export function estimateCacheMissUsd(
 }
 
 /**
+ * C1（2026-10-05）估算用：一次 assistant 回覆的輸出 token 保守假設。
+ * 我們沒有可靠的每回合輸出長度來源（決策日誌刻意不存內容），故取一個略高的
+ * 常數——偶爾多降一層，也好過在 cap 前一輪用旗艦模型跨過上限。
+ */
+export const OUTPUT_TOKEN_ESTIMATE = 2000;
+
+/**
+ * 估算「這一輪」的模型成本（USD）：context 當輸入、{@link OUTPUT_TOKEN_ESTIMATE}
+ * 當輸出。任一前提未知 → `undefined`（不猜）。
+ */
+export function estimateTurnUsd(contextTokens: number | null, rates: CostRates | null): number | undefined {
+  if (contextTokens === null || contextTokens <= 0 || !Number.isFinite(contextTokens) || rates === null) return undefined;
+  const total = (contextTokens / 1_000_000) * rates.input + (OUTPUT_TOKEN_ESTIMATE / 1_000_000) * (rates.output ?? 0);
+  if (!Number.isFinite(total) || total <= 0) return undefined;
+  return total;
+}
+
+/**
  * Stage 2→4：compose → select → 可用性回退 → cache 估算 → guard。
  *
  * 可用性回退（Part 5 Stage 4 契約）：先試 `picked`，再依序試鏈上候選，
@@ -101,30 +120,65 @@ export function planTurn(
     { todayUsd: snapshot.todayUsd, monthUsd: snapshot.monthUsd },
     config,
   );
-  const effectiveTier = budget.tier;
-  const selected = selectTargets(effectiveTier, judgment, config);
+  let effectiveTier = budget.tier;
+  let budgetForced = budget.forced;
+  const reasons = [...budget.reasons];
 
   // W8（2026-10-03）：以 **registry 即時價格**重驗價格天花板——靜態 facts 可能
   // 過期；未知價格不擋（fail-open）。
   // N3（複審）：預算降級後要用**有效層級**的天花板，否則會放過超 quick 價的候選。
-  const ceiling = ceilingFor(config, effectiveTier);
-  const priceOk = (candidate: Target): boolean => {
-    // Part 9 L3：顯式條目（使用者自己寫的）永不被政策過濾——價格天花板也一樣。
-    if (candidate.explicit) return true;
-    if (ceiling === null) return true;
-    const cost = deps.costOf(candidate);
-    if (!cost) return true;
-    const blended = cost.input + 2 * (cost.output ?? 0);
-    return blended <= ceiling;
+  const pickFor = (tier: Tier): { target?: Target; notes: string[] } => {
+    const selected = selectTargets(tier, judgment, config);
+    const ceiling = ceilingFor(config, tier);
+    const priceOk = (candidate: Target): boolean => {
+      // Part 9 L3：顯式條目（使用者自己寫的）永不被政策過濾——價格天花板也一樣。
+      if (candidate.explicit) return true;
+      if (ceiling === null) return true;
+      const cost = deps.costOf(candidate);
+      if (!cost) return true;
+      const blended = cost.input + 2 * (cost.output ?? 0);
+      return blended <= ceiling;
+    };
+    const target =
+      selected.picked && deps.isAvailable(selected.picked) && priceOk(selected.picked)
+        ? selected.picked
+        : selected.chain.find((candidate) => deps.isAvailable(candidate) && priceOk(candidate));
+    return { target, notes: selected.notes };
   };
 
-  let target: Target | undefined;
-  if (selected.picked && deps.isAvailable(selected.picked) && priceOk(selected.picked)) target = selected.picked;
-  else target = selected.chain.find((candidate) => deps.isAvailable(candidate) && priceOk(candidate));
+  let picked = pickFor(effectiveTier);
 
-  if (!target) {
-    return { composed, notes: selected.notes, unavailable: true };
+  // C1（2026-10-05）：**事前**成本投影。applyBudget 只看已花的錢，可能在 cap
+  // 前最後一輪用昂貴模型跨過上限。這裡用「context 當輸入 + 保守輸出估數」估這
+  // 一輪成本；若會觸及 hard ratio，就再降一層並重選（只在重選有目標時採用）。
+  if (picked.target && !budget.forced) {
+    const projected = estimateTurnUsd(snapshot.contextTokens, deps.costOf(picked.target));
+    const projectedPressure =
+      projected === undefined
+        ? 0
+        : computePressure(
+            { todayUsd: snapshot.todayUsd + projected, monthUsd: snapshot.monthUsd + projected },
+            config,
+          );
+    if (projected !== undefined && projectedPressure >= config.budget.hardRatio) {
+      const lowerIndex = Math.max(0, TIERS.indexOf(effectiveTier) - 1);
+      const lower = TIERS[lowerIndex];
+      if (lower !== effectiveTier) {
+        const retry = pickFor(lower);
+        if (retry.target) {
+          reasons.push(`projected next turn $${projected.toFixed(3)} reaches budget hard ratio → ${lower}`);
+          effectiveTier = lower;
+          budgetForced = true;
+          picked = retry;
+        }
+      }
+    }
   }
+
+  if (!picked.target) {
+    return { composed, notes: picked.notes, unavailable: true };
+  }
+  const target = picked.target;
 
   // prompt-cache miss 估算（Part 7）：只在真的換模型時算。
   const targetKey = target.provider ? `${target.provider}/${target.model}` : target.model;
@@ -142,13 +196,13 @@ export function planTurn(
       monthUsd: snapshot.monthUsd,
       lastSwitchAtMs: snapshot.lastSwitchAtMs,
       cachePenaltyUsd: cacheMissUsd,
-      budgetForced: budget.forced,
+      budgetForced,
     },
     config,
     config.mode,
   );
 
   // 預算理由與 guard 理由合併（entry 顯示完整因果）。
-  const reason = [...budget.reasons, result.reason].filter(Boolean).join(" · ") || undefined;
-  return { composed, target, guard: { ...result, reason }, notes: selected.notes, cacheMissUsd };
+  const reason = [...reasons, result.reason].filter(Boolean).join(" · ") || undefined;
+  return { composed, target, guard: { ...result, reason }, notes: picked.notes, cacheMissUsd };
 }
