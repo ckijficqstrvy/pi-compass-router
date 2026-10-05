@@ -926,18 +926,22 @@ pressure = max(today÷dailyUsd, month÷monthlyUsd)
 `blendedOf(price)`、`sliceBands(ranked, ceilings)`。
 
 `refresh-facts`：`npm run refresh-facts`（`-- --dry-run` 預覽）；
-價格**從 pi 的 model catalogue 同步，不手抄**；
-能力分數人工核對後寫入；報告 slug 漂移與未評分模型。
+價格**OpenRouter 公開 API 優先，其次保留既存值，最後才是 pi catalogue**
+（取不到 API 價時**不拿 catalogue 快照覆蓋既存價**——否則價格會在兩者間來回跳、連帶讓 price-band 飄移）；
+能力分數人工核對後寫入；報告 slug 漂移與未評分模型。`--no-api` 跳過網路（測試／離線）。
 
 （2026-10-05）facts 不再限於 `openrouter`：
 - 原生 provider `deepseek` 的 `deepseek-flash`（cap 39，AA index）與
   `openrouter/deepseek/deepseek-v4.1-flash`（同一個 V4.1 Flash 的另一條 provider
   路徑）都列為候選，同一模型可跨 provider 備援。舊 slug
   `openrouter/deepseek/deepseek-v4-flash` 其實是 **0423 世代**，已更正為
-  `deepseek/deepseek-v4.1-flash`（價格依 facts 規則取 OpenRouter API）。
-- **被支配的模型不入 facts**：V4.1 Flash（cap 39）比原生 `deepseek-v4-pro`
-  （cap 36）又強又便宜，故不列後者。
-- 價格由 refresh 自 catalogue／OpenRouter API 同步，facts 可跨 provider。
+  `deepseek/deepseek-v4.1-flash`。
+- **被支配的模型不入 facts**：OpenRouter 別名 `~deepseek/deepseek-pro-latest`
+  （description 自述 redirect 到最新 Pro = V4 Pro 0813，cap 36）與原生
+  `deepseek-v4-pro` 都被 V4.1 Flash（cap 39）又強又便宜地支配，故不列。
+- 價格由 refresh 自 OpenRouter API 同步，facts 可跨 provider。注意 OpenRouter
+  對同一 id 曾短暫回過異常價（v4.1-flash 一次 $0.003/$2.4、穩定值 $0.3/$1.2），
+  已以多次讀值確認為後者。
 
 ---
 
@@ -1541,6 +1545,7 @@ pi-compass/
 | 13 | **402 細分**：新增 `credit_cap` 類別——402 但訊息含 `fewer max_tokens`／`can only afford`（本次預借的 max_tokens 超過餘額）只冷卻該 model 5m，不 provider-wide 封鎖；真正的帳號額度不足仍歸 `quota`（30m、provider-wide）。修正 openrouter 402 把整個 provider 誤封 30m 的問題 | Part 8.4 |
 | 14 | 全部候選冷卻的 skipped 訊息可行動化：列出冷卻候選、`allowProviders` 範圍，且當前模型也在冷卻時明說「this turn will likely fail」與補救方向 | Part 8.4、Part 5 Stage 5 |
 | 15 | `accept.sh` 第 3 項去耦供應商可用性：只把 `Failed to load extension` 判失敗，供應商 402／斷線視為載入成功（gate 不再因帳務/網路變紅） | Part 12 |
-| 16 | facts 加入原生 `deepseek` 的 `deepseek-flash`（cap 39）；openrouter 舊 slug `deepseek/deepseek-v4-flash`（0423 世代）更正為 `deepseek/deepseek-v4.1-flash`；被支配的原生 `deepseek-v4-pro` 不列。配合 `allowProviders` 含 deepseek，同一 V4.1 Flash 可跨 provider 備援 | Part 9 |
+| 16 | facts 加入原生 `deepseek` 的 `deepseek-flash`（cap 39）；openrouter 舊 slug `deepseek/deepseek-v4-flash`（0423 世代）更正為 `deepseek/deepseek-v4.1-flash`；被支配的 `~deepseek/deepseek-pro-latest`（= V4 Pro 0813）與原生 `deepseek-v4-pro` 不列。配合 `allowProviders` 含 deepseek，同一 V4.1 Flash 可跨 provider 備援 | Part 9 |
+| 17 | `refresh-facts` 價格決策修正：API 取不到時**保留既存價**，不用 catalogue 快照覆蓋（只在事實還沒價格時才由 catalogue 填）；新增 `--no-api` 供決定性測試。防同一筆價格在 API 價與 catalogue 價之間來回跳、使 band 飄移 | Part 9 |
 
 未做/排除：分類準確度評估集、npm 發佈；健康冷卻秒數仍為內建常數（B2，待有實測需求再開放）。

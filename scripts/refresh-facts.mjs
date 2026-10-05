@@ -5,8 +5,10 @@
  *
  * 自動化的部分（永遠不要手改）：
  *   · `price` — **OpenRouter 公開 API 優先**（`GET /api/v1/models` 的
- *     `pricing.prompt/completion`，USD/token → USD/M），抓不到退回 pi 的
- *     model catalogue（`cost.input` / `cost.output`），讓價格即時且不靠人抄。
+ *     `pricing.prompt/completion`，USD/token → USD/M）；取不到時**保留既存價格**
+ *     （不拿 pi catalogue 的舊快照覆蓋，避免價格在兩者間來回跳、讓 band 飄移）；
+ *     只有在事實還沒有價格時才用 pi catalogue（`cost.input` / `cost.output`）填坑。
+ *     讓價格即時且不靠人抄。
  *   · 生命週期 — slug 已從 catalogue 消失的事實會被報告，catalogue 裡
  *     尚未進入 facts 的模型會列成候選。
  *
@@ -16,7 +18,8 @@
  *     所以換 provider 不影響它。腳本永不猜分數；只報告哪些條目帶
  *     `estimated: true`、哪些模型還沒有分數。
  *
- * Usage: npm run refresh-facts [-- --dry-run] [-- --catalog <file>] [-- --facts <file>]
+ * Usage: npm run refresh-facts [-- --dry-run] [-- --no-api] [-- --catalog <file>] [-- --facts <file>]
+ *   `--no-api` 跳過 OpenRouter API（測試／離線；只走保留與 catalogue 兩條路徑）。
  */
 import { readFileSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
@@ -27,11 +30,13 @@ const here = dirname(fileURLToPath(import.meta.url));
 const agentDir = process.env.PI_CODING_AGENT_DIR?.trim() || join(homedir(), ".pi", "agent");
 
 let dryRun = false;
+let noApi = false;
 let catalogFile = join(agentDir, "models-store.json");
 let factsFile = join(here, "..", "extensions", "pi-compass-router", "model-facts.json");
 for (let i = 2; i < process.argv.length; i += 1) {
   const arg = process.argv[i];
   if (arg === "--dry-run") dryRun = true;
+  else if (arg === "--no-api") noApi = true;
   else if (arg === "--catalog") catalogFile = process.argv[++i];
   else if (arg === "--facts") factsFile = process.argv[++i];
   else {
@@ -52,25 +57,30 @@ const readJson = (file) => {
 const catalog = readJson(catalogFile);
 const facts = readJson(factsFile);
 
-// 價格來源 1：OpenRouter 公開 API（免金鑰）。失敗 → 空 map，落回 catalogue。
+// 價格來源 1：OpenRouter 公開 API（免金鑰）。失敗 → 空 map，落回既有價/catalogue。
+// `--no-api` 跳過網路（測試與離線用）。
 const OPENROUTER_MODELS_URL = "https://openrouter.ai/api/v1/models";
 const apiPrices = new Map();
 let apiSource = "OpenRouter API";
 /** USD/M 取到小數 6 位（per-token 價格 ×1e6 會有浮點雜訊）。 */
 const round6 = (n) => Math.round(n * 1e6) / 1e6;
-try {
-  const response = await fetch(OPENROUTER_MODELS_URL, { signal: AbortSignal.timeout(15_000) });
-  if (!response.ok) throw new Error(`HTTP ${response.status}`);
-  const payload = await response.json();
-  for (const entry of payload?.data ?? []) {
-    if (typeof entry?.id !== "string" || entry.id.includes(":batch")) continue;
-    const input = round6(Number(entry?.pricing?.prompt) * 1e6);
-    const output = round6(Number(entry?.pricing?.completion) * 1e6);
-    if (!Number.isFinite(input) || !Number.isFinite(output)) continue;
-    apiPrices.set(`openrouter/${entry.id}`, { input, output });
+if (noApi) {
+  apiSource = "skipped (--no-api)";
+} else {
+  try {
+    const response = await fetch(OPENROUTER_MODELS_URL, { signal: AbortSignal.timeout(15_000) });
+    if (!response.ok) throw new Error(`HTTP ${response.status}`);
+    const payload = await response.json();
+    for (const entry of payload?.data ?? []) {
+      if (typeof entry?.id !== "string" || entry.id.includes(":batch")) continue;
+      const input = round6(Number(entry?.pricing?.prompt) * 1e6);
+      const output = round6(Number(entry?.pricing?.completion) * 1e6);
+      if (!Number.isFinite(input) || !Number.isFinite(output)) continue;
+      apiPrices.set(`openrouter/${entry.id}`, { input, output });
+    }
+  } catch (error) {
+    apiSource = `pi catalogue（OpenRouter API 連線失敗：${String(error).slice(0, 60)}）`;
   }
-} catch (error) {
-  apiSource = `pi catalogue（OpenRouter API 連線失敗：${String(error).slice(0, 60)}）`;
 }
 
 /** 攤平目錄：`{ providerKey: { models: [...] } }` → 查找表。 */
@@ -97,6 +107,7 @@ const samePrice = (a, b) => !!a && !!b && a.input === b.input && a.output === b.
 
 const priced = [];
 const kept = [];
+const retained = [];
 const missing = [];
 const estimated = [];
 let apiUsed = 0;
@@ -106,14 +117,29 @@ for (const fact of facts.models ?? []) {
   const key = `${fact.provider}/${fact.model}`;
   const match = byProviderModel.get(key) ?? byId.get(fact.model);
   const fromApi = apiPrices.get(key);
-  const next = fromApi ?? (match?.cost ? { input: match.cost.input, output: match.cost.output } : undefined);
+
+  // 價格優先序：OpenRouter API > 既存事實價 > catalogue 快照。
+  // API 抓不到時**絕不用 catalogue 覆蓋已存在的價格**：catalogue 對 openrouter
+  // slug 可能是原生/過期價（實測 v4.1-flash API $0.003/$2.4 vs catalogue $0.3/$1.2），
+  // 覆蓋會讓價格在兩者間來回跳、連帶讓 price-band 飄移（2026-10-05）。
+  let next = fromApi;
+  let via = fromApi ? "api" : null;
+  if (!next && fact.price) {
+    next = fact.price;
+    via = "retained";
+  }
+  if (!next && match?.cost) {
+    next = { input: match.cost.input, output: match.cost.output };
+    via = "catalogue";
+  }
   if (!next) {
     missing.push(key);
     if (fact.estimated) estimated.push(key);
     continue;
   }
-  if (fromApi) apiUsed += 1;
-  else catalogUsed += 1;
+  if (via === "api") apiUsed += 1;
+  else if (via === "catalogue") catalogUsed += 1;
+  else retained.push(key);
   if (!samePrice(fact.price, next)) {
     priced.push(`${key}: ${priceText(fact.price)} -> ${priceText(next)}`);
     fact.price = next;
@@ -152,6 +178,8 @@ console.log(`\nprices updated (${priced.length}):`);
 for (const line of priced) console.log(`  ${line}`);
 if (priced.length === 0) console.log("  (already current)");
 console.log(`\nprices unchanged: ${kept.length}`);
+console.log(`  of which retained without an OpenRouter API price (kept the existing value): ${retained.length}`);
+for (const line of retained) console.log(`    ${line}`);
 console.log(`\nnot in catalogue — check the slug (${missing.length}):`);
 for (const line of missing) console.log(`  ${line}`);
 if (missing.length === 0) console.log("  (none)");

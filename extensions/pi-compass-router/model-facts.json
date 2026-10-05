@@ -1,6 +1,6 @@
 {
-  "generatedAt": "2026-10-02",
-  "source": "capability: manual scores (AA intelligence index / Terminal-Bench cross-check), never auto-guessed; prices auto-synced by `npm run refresh-facts` from OpenRouter API (fallback: pi model catalogue) on 2026-10-02.",
+  "generatedAt": "2026-10-05",
+  "source": "capability: manual scores (AA intelligence index / Terminal-Bench cross-check), never auto-guessed; prices auto-synced by `npm run refresh-facts` from OpenRouter API (fallback: pi model catalogue) on 2026-10-05.",
   "models": [
     {
       "provider": "openrouter",
@@ -66,8 +66,8 @@
       "model": "~z-ai/glm-latest",
       "capability": 45,
       "price": {
-        "input": 0.12,
-        "output": 4
+        "input": 0.03,
+        "output": 12
       },
       "note": "glm-5.3, agentic-terminal reputation"
     },
@@ -86,8 +86,8 @@
       "model": "moonshotai/kimi-k3",
       "capability": 44,
       "price": {
-        "input": 2.7,
-        "output": 13.5
+        "input": 0.67,
+        "output": 14
       },
       "note": "1M ctx, Frontend Arena #1, weak terminal-agentic (TB4 13%)"
     },
@@ -106,8 +106,8 @@
       "model": "~z-ai/glm-flash-latest",
       "capability": 42,
       "price": {
-        "input": 0.02625,
-        "output": 0.9
+        "input": 0.0352,
+        "output": 0.5
       },
       "note": "glm-5.3-flash; #1 by OpenRouter monthly token volume"
     },
@@ -125,10 +125,10 @@
       "model": "deepseek/deepseek-v4.1-flash",
       "capability": 39,
       "price": {
-        "input": 0.003,
-        "output": 2.4
+        "input": 0.3,
+        "output": 1.2
       },
-      "note": "DeepSeek V4.1 Flash; slug corrected 2026-10-05 (the old deepseek/deepseek-v4-flash is the 0423 model, a different/older generation). openrouter price is the OpenRouter API value ($0.003/$2.4 per 1M, verified live 2026-10-05); the pi catalogue / native deepseek entry is $0.3/$1.2. AA intelligence index 39 (reasoning, max effort)"
+      "note": "DeepSeek V4.1 Flash; slug corrected 2026-10-05 (the old deepseek/deepseek-v4-flash is the 0423 model, a different/older generation). Price is the OpenRouter API value ($0.3/$1.2 per 1M, stable over 3 reads 2026-10-05) and matches the native deepseek catalogue; an earlier API read returned a transient $0.003/$2.4. AA intelligence index 39 (reasoning, max effort)"
     },
     {
       "provider": "openrouter",
@@ -157,15 +157,6 @@
       "price": {
         "input": 0.1,
         "output": 0.5
-      }
-    },
-    {
-      "provider": "openrouter",
-      "model": "~deepseek/deepseek-pro-latest",
-      "capability": 36,
-      "price": {
-        "input": 0.132,
-        "output": 0.396
       }
     },
     {
