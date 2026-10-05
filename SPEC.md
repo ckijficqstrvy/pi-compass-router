@@ -930,9 +930,10 @@ pressure = max(today÷dailyUsd, month÷monthlyUsd)
 能力分數人工核對後寫入；報告 slug 漂移與未評分模型。
 
 （2026-10-05）facts 不再限於 `openrouter`：已加入原生 provider `deepseek`
-（`deepseek-flash` capability 39，AA index 有來源；`deepseek-v4-pro` 36，
-標 `estimated: true` 待人工核對，與既有 `openrouter/~deepseek/deepseek-pro-latest`
-一致）。價格由 refresh 自 pi catalogue 同步，facts 可跨 provider。
+（`deepseek-flash` capability 39，AA index 有來源）。**被支配的模型不入 facts**：
+Flash（cap 39、blended 2.7）比 Pro（cap 36、blended 9.24）又強又便宜，
+故不再列 `deepseek-v4-pro`——留在鏈裡只會在 high 帶貢獻更弱更貴的選項。
+價格由 refresh 自 pi catalogue 同步，facts 可跨 provider。
 
 ---
 
@@ -1536,6 +1537,6 @@ pi-compass/
 | 13 | **402 細分**：新增 `credit_cap` 類別——402 但訊息含 `fewer max_tokens`／`can only afford`（本次預借的 max_tokens 超過餘額）只冷卻該 model 5m，不 provider-wide 封鎖；真正的帳號額度不足仍歸 `quota`（30m、provider-wide）。修正 openrouter 402 把整個 provider 誤封 30m 的問題 | Part 8.4 |
 | 14 | 全部候選冷卻的 skipped 訊息可行動化：列出冷卻候選、`allowProviders` 範圍，且當前模型也在冷卻時明說「this turn will likely fail」與補救方向 | Part 8.4、Part 5 Stage 5 |
 | 15 | `accept.sh` 第 3 項去耦供應商可用性：只把 `Failed to load extension` 判失敗，供應商 402／斷線視為載入成功（gate 不再因帳務/網路變紅） | Part 12 |
-| 16 | facts 加入原生 `deepseek` provider（`deepseek-flash` cap 39、`deepseek-v4-pro` cap 36 標 estimated），配合 `allowProviders` 含 deepseek，使其成為非 openrouter 的一級候選／備援；`refresh-facts` 確認跨 provider 價格同步 | Part 9 |
+| 16 | facts 加入原生 `deepseek` provider 的 `deepseek-flash`（cap 39，AA index），配合 `allowProviders` 含 deepseek，使其成為非 openrouter 的一級候選／備援；被支配的 `deepseek-v4-pro`（cap 36 但 blended 9.24）不入 facts | Part 9 |
 
 未做/排除：分類準確度評估集、npm 發佈；健康冷卻秒數仍為內建常數（B2，待有實測需求再開放）。
