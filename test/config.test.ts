@@ -297,6 +297,8 @@ test("validatePatch accepts well-formed values", () => {
   assert.equal(validatePatch("suggest", { scoresFile: "" }), null);
   assert.equal(validatePatch("suggest", { scoresFile: "/tmp/scores.json" }), null);
   assert.equal(validatePatch("classify", { provider: "laya", timeoutMs: 400 }), null);
+  assert.equal(validatePatch("selection", "registry"), null);
+  assert.match(String(validatePatch("selection", "magic")), /selection/);
 });
 
 test("WRITABLE_KEYS matches the SPEC Part 3.1 whitelist", () => {
@@ -309,6 +311,7 @@ test("WRITABLE_KEYS matches the SPEC Part 3.1 whitelist", () => {
     "stickiness",
     "mode",
     "modelPick",
+    "selection",
     "profile",
     "classify",
     "routes",
@@ -617,6 +620,7 @@ const VALID_SAMPLES: ReadonlyArray<{ key: string; value: unknown }> = [
   { key: "mode", value: "auto" },
   { key: "profile", value: "cheap" },
   { key: "modelPick", value: "menu" },
+  { key: "selection", value: "registry" },
   { key: "stickiness", value: false },
   { key: "useDefaultModels", value: true },
   { key: "autoRoutes", value: true },

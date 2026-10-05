@@ -3,6 +3,9 @@
 // 接線契約見 SPEC Part 11「index.ts 接線契約」節（2026-10-01 定）。
 // 整個路由鉤子 fail-open（Part 2）：任何异常都不擋住使用者的回合。
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
+import { readFileSync } from "node:fs";
+import { homedir } from "node:os";
+import { join } from "node:path";
 import { Type } from "typebox";
 
 import { loadConfig, validatePatch, writeConfigPatch } from "./config/load.js";
@@ -36,6 +39,14 @@ import { tr, tl } from "./ui/strings.js";
 import { suggest } from "./suggest.js";
 import { runSettingsWizard, factsAgeDays, type CandidateKind, type WizardHooks } from "./ui/wizard.js";
 import { MODEL_FACTS } from "./policy/facts.js";
+import {
+  buildRoutes,
+  capabilityByCanonical,
+  type EndpointQuote,
+  type RegistryModel,
+  type Route,
+} from "./policy/routes.js";
+import { registryChain } from "./policy/candidates.js";
 import { cloudClassifierKeys, localCheckpoints, openRouterModelKeys } from "./ui/sources.js";
 import type { CompassConfig, Mode, Target, ThinkingLevel, Tier } from "./schema.js";
 
@@ -72,6 +83,10 @@ interface SessionState {
   health: ModelHealth;
   /** 最近一次載入設定的警告（Part 3.4；session_start 顯示）。 */
   configWarnings: string[];
+  /** S2：registry 可行集（lazy 建、session 內快取）。 */
+  registryRoutes?: Route[];
+  /** S2：canonical → 主分數（intelligence）。 */
+  registryCapability?: Map<string, number>;
 }
 
 /** 追蹤 session 狀態（工廠不啟動行程，狀態在 session_start 填）。 */
@@ -143,7 +158,58 @@ function snapshotFor(ctx: ExtensionContext, config: CompassConfig, state: Sessio
  * PlanDeps（同上）。health 提供時，處於冷卻的 provider/model 會被視為不可用
  *（Part 8.4）；`avoided` 收集被跳過的候選字串，供 entry 說明用。
  */
-function depsFor(ctx: ExtensionContext, health?: ModelHealth, avoided?: string[]): PlanDeps {
+/**
+ * 讀 refresh 產生的 endpoint 快取（`~/.pi/agent/pi-compass/openrouter-endpoints.json`）。
+ * 缺失/壞掉一律回空 map，絕不 throw（與 health 讀取同一 fail-open 原則）。
+ */
+function loadEndpointCache(
+  file: string = join(homedir(), ".pi", "agent", "pi-compass", "openrouter-endpoints.json"),
+): Map<string, EndpointQuote[]> {
+  const out = new Map<string, EndpointQuote[]>();
+  try {
+    const parsed = JSON.parse(readFileSync(file, "utf8")) as { routes?: Record<string, EndpointQuote[]> };
+    for (const [key, quotes] of Object.entries(parsed.routes ?? {})) {
+      if (Array.isArray(quotes) && quotes.length > 0) out.set(key, quotes);
+    }
+  } catch {
+    // 無快取：registryChain 會退回 registry 的單一 cost。
+  }
+  return out;
+}
+
+/**
+ * S2：由 pi registry 建 route 表 + canonical 能力表（session 內快取）。
+ * 只在 `selection: "registry"` 時被呼叫；bands 模式完全不碰。
+ */
+function registryTablesFor(ctx: ExtensionContext, state: SessionState): { routes: Route[]; capability: Map<string, number> } {
+  if (state.registryRoutes && state.registryCapability) {
+    return { routes: state.registryRoutes, capability: state.registryCapability };
+  }
+  const registry: RegistryModel[] = ctx.modelRegistry.getAll().map((model) => {
+    const cost = model.cost as { input?: number; output?: number } | undefined;
+    return {
+      provider: String(model.provider),
+      id: model.id,
+      cost: cost && typeof cost.input === "number" ? { input: cost.input, output: cost.output ?? 0 } : undefined,
+      contextWindow: (model as { contextWindow?: number }).contextWindow,
+    };
+  });
+  const routes = buildRoutes(registry, { endpointsByKey: loadEndpointCache() });
+  const { byCanonical } = capabilityByCanonical(MODEL_FACTS.models);
+  const capability = new Map<string, number>();
+  for (const [canonical, entry] of byCanonical) capability.set(canonical, entry.capability.intelligence);
+  state.registryRoutes = routes;
+  state.registryCapability = capability;
+  return { routes, capability };
+}
+
+/**
+ * PlanDeps（同上）。health 提供時，處於冷卻的 provider/model 會被視為不可用
+ *（Part 8.4）；`avoided` 收集被跳過的候選字串，供 entry 說明用。
+ */
+function depsFor(ctx: ExtensionContext, state: SessionState, avoided?: string[]): PlanDeps {
+  const health = state.health;
+  const tables = state.config.selection === "registry" ? registryTablesFor(ctx, state) : undefined;
   return {
     isAvailable: (candidate) => {
       if (resolveModel(ctx, candidate) === undefined) return false;
@@ -157,6 +223,11 @@ function depsFor(ctx: ExtensionContext, health?: ModelHealth, avoided?: string[]
       return true;
     },
     costOf: (candidate) => costRatesOf(resolveModel(ctx, candidate)),
+    registryChain:
+      tables === undefined
+        ? undefined
+        : (tier, judgment) =>
+            registryChain({ tier, config: state.config, routes: tables.routes, capability: tables.capability }),
   };
 }
 
@@ -195,7 +266,7 @@ async function dryRun(
     return `${kind} · demand ${composed.demand.toFixed(2)} · tier ${composed.tier}${first ? ` → ${targetKey(first)}` : " → (no route)"} (estimate: availability/budget not checked)`;
   }
   const avoided: string[] = [];
-  const plan = planTurn(judgment, config, snapshotFor(ctx, config, state), depsFor(ctx, state.health, avoided));
+  const plan = planTurn(judgment, config, snapshotFor(ctx, config, state), depsFor(ctx, state, avoided));
   const target = plan.target ? targetKey(plan.target) : "(no route available)";
   const reason = plan.guard?.reason ? ` · ${plan.guard.reason}` : "";
   const avoidNote = avoided.length > 0 ? ` · avoiding ${[...new Set(avoided)].join("; ")}` : "";
@@ -269,7 +340,7 @@ async function routeTurn(
   const current = currentTarget(ctx, config);
   const snapshot = snapshotFor(ctx, config, state);
   const avoided: string[] = [];
-  const plan = planTurn(judgment, config, snapshot, depsFor(ctx, state.health, avoided));
+  const plan = planTurn(judgment, config, snapshot, depsFor(ctx, state, avoided));
   const entryNotes = healthNotes(plan.notes, avoided);
   const budgetPressure = computePressure(snapshot, config);
   const entryMeta = {

@@ -1,10 +1,14 @@
 # 設計草稿：Canonical Models × Routes（2026-10-05）
 
-> 狀態：**S1/S1b 已實作（分支 `feat/canonical-model-routes`）；S2 以後待裁決**。本檔描述把
-> 「能力／價格／偏好」三者拆開的資料模型與遷移路徑。第一刀只做資料層，**不動** JEV 與偏好學習。
+> 狀態：**S1/S1b/S2 已實作（分支 `feat/canonical-model-routes`）；S3 以後待裁決**。本檔描述把
+> 「能力／價格／偏好」三者拆開的資料模型與遷移路徑。S2 以 `selection` 旗標提供
+> （預設 `bands`＝現行行為不變；`registry`＝可行集），失敗一律回退 bands。
 >
 > 進度：S1（canonical 身分 + route/endpoint 模組）、能力向量化（intelligence 為主分數，
-> coding/agentic 有來源才填）已完成；S1b（refresh 快取 OpenRouter endpoints）已完成，
+> coding/agentic 有來源才填）、S1b（refresh 快取 OpenRouter endpoints）完成。
+> S2：`selection: "registry"` → `policy/candidates.ts` 由 registry 全體建可行集
+> （能力查 canonical、價格取健康 endpoint 中位數、政策/冷卻照舊），接上
+> `selectTargets`/`planTurn`。實測 504 routes、每層上限 25 並去重。
 > 實測 deepseek-v4.1-flash 30 個上游最便宜健康價 $0.09/$0.18 vs 摘要價 $0.3/$1.2。
 
 ## 1. 問題：三個不同的東西被擠在同一張表
