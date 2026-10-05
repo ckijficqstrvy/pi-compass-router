@@ -1402,8 +1402,11 @@ pi-compass/
 
 取代現有 13 支指令的字串串接。`typecheck` 保持 `tsc --noEmit`。
 `build/` 加入 `.gitignore`（編譯產物）。
-CI：`.github/workflows/ci.yml`，兩個 job（`typecheck`、`test`），
-push 與 pull_request 皆觸發。
+驗證（2026-10-05 改）：**不使用 GitHub Actions**（CI 有分鐘數限制）。
+唯一關卡是**本機** `scripts/accept.sh`（typecheck + tests + 真 `pi -ne -e`
+載入 + laya latency + 靜態驗收），並由版本控管的 `.githooks/pre-push`
+強制；推不上即驗收失敗。安裝：`git config core.hooksPath .githooks`；
+刻意略過用 `git push --no-verify`。
 
 驗收：
 

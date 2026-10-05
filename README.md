@@ -96,6 +96,21 @@ npm run typecheck
 npm test
 ```
 
+本專案**不使用 GitHub Actions**（CI 有分鐘數限制）。發佈前的唯一關卡是
+**本機驗收**，並由 `pre-push` hook 強制——驗收不過就推不上去：
+
+```sh
+# clone 後設定一次（把 hook 目錄指向版本控管的 .githooks/）
+git config core.hooksPath .githooks
+
+# 手動重跑同一套驗收（typecheck + tests + 真 pi 載入 + laya latency + 靜態檢查）
+bash scripts/accept.sh
+```
+
+要刻意略過（例如只推文件）：`git push --no-verify`。
+想在另一台機器驗證，把 repo clone 過去、`npm ci` 後跑 `bash scripts/accept.sh` 即可。
+（`COMPASS_ACCEPT_SKIP_ENV=1` 會跳過需要 pi CLI 與本機 laya 的兩項，僅在沒有這些資源時使用。）
+
 ### 更新模型事實（能力分數清單）
 
 `extensions/pi-compass-router/model-facts.json` 是 L1 事實層的唯一來源：
