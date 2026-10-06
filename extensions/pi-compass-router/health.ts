@@ -105,6 +105,11 @@ export function classifyModelError(
  */
 export class ModelHealth {
   private readonly entries = new Map<string, ModelFailure>();
+  /**
+   * 每 provider 累計的 credit_cap 次數（session 內；不持久化）。只在 single-model
+   * provider 上才會關鍵——那種provider 沒有「另一個 model 也在 credit_cap」的證據。
+   */
+  private readonly creditCaps = new Map<string, number>();
 
   constructor(initial: readonly ModelFailure[] = []) {
     for (const entry of initial) this.entries.set(entry.key, entry);
@@ -132,8 +137,39 @@ export class ModelHealth {
     return { model: modelFailure };
   }
 
+  /**
+   * 標記一次 credit_cap（本次預借的 max_tokens 超過餘額）。單次只冷卻該 model
+   * （換小模型即可）；但出現以下任一情形就升成 provider 層的 quota 冷卻，因為
+   * 那才符合「帳號真的沒錢」的樣態：
+   *   - `escalate` 為真（呼叫端的外部證據，例如餘額探測說這個 provider 見底）；
+   *   - 同一 provider 已有**另一個** model 在 credit_cap 冷卻中；
+   *   - 同一 provider 的 credit_cap 累計 >= 2 次（涵蓋只有一個 model 的 provider，
+   *     否則會每 5 分鐘重試同一個沒錢的 provider——2026-10-06 實測）。
+   * 單一、首次的 credit_cap 仍維持 model 層，不誤殺還有錢的 provider。
+   */
+  markCreditCap(
+    provider: string,
+    model: string,
+    opts: { escalate?: boolean; now?: number } = {},
+  ): { model: ModelFailure; provider?: ModelFailure } {
+    const now = opts.now ?? Date.now();
+    const key = `${provider}/${model}`;
+    const modelFailure = this.set(key, "model", "credit_cap", now);
+    const count = (this.creditCaps.get(provider) ?? 0) + 1;
+    this.creditCaps.set(provider, count);
+    const otherModelCooling = this.list(now).some(
+      (entry) => entry.scope === "model" && entry.klass === "credit_cap" && entry.key !== key && entry.key.startsWith(`${provider}/`),
+    );
+    if (opts.escalate === true || otherModelCooling || count >= 2) {
+      return { model: modelFailure, provider: this.set(`provider:${provider}`, "provider", "quota", now) };
+    }
+    return { model: modelFailure };
+  }
+
   clearModel(provider: string, model: string): void {
     this.entries.delete(`${provider}/${model}`);
+    // 成功回應代表這個 provider 又能用了：累計器歸零，避免跨回合誤升級。
+    this.creditCaps.delete(provider);
   }
 
   /** 清掉一個明確 key（`provider/model` 或 `provider:<name>`）。 */

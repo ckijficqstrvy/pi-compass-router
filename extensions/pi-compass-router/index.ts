@@ -31,6 +31,7 @@ import {
   CREDIT_PROBES,
   CREDIT_TTL_MS,
   CreditBook,
+  formatBalance,
   loadCredits,
   probeProvider,
   saveCredits,
@@ -259,7 +260,7 @@ function depsFor(ctx: ExtensionContext, state: SessionState, avoided?: string[])
       const providerName = candidate.provider || resolved.provider;
       const drained = providerName ? state.credits.exhausted(providerName) : undefined;
       if (drained) {
-        avoided?.push(`${providerName} (balance $${drained.remainingUsd.toFixed(4)})`);
+        avoided?.push(`${providerName} (${formatBalance(drained)})`);
         return false;
       }
       return true;
@@ -690,11 +691,13 @@ export default function compass(pi: ExtensionAPI): void {
         for (const provider of targets) {
           const apiKey = await ctx.modelRegistry.getApiKeyForProvider(provider);
           if (!apiKey) continue;
-          const remainingUsd = await probeProvider(provider, apiKey, { signal });
-          if (remainingUsd === undefined) continue;
+          const remaining = await probeProvider(provider, apiKey, { signal });
+          if (remaining === undefined) continue;
           state.credits.set({
             provider,
-            remainingUsd,
+            remainingUsd: remaining.remainingUsd,
+            currency: remaining.currency,
+            available: remaining.available,
             checkedAt: Date.now(),
             source: CREDIT_PROBES[provider].url,
           });
@@ -787,7 +790,14 @@ export default function compass(pi: ExtensionAPI): void {
       if (failure.klass === "credit_cap" || failure.klass === "quota") void refreshCredits(ctx, true);
       const alreadyCooling =
         state.health.isCoolingDown(modelKey) || state.health.isCoolingDown(`provider:${provider}`);
-      const marked = state.health.markFailure(provider, modelId, failure.klass);
+      // credit_cap（本次預借過大）單次只冷卻該 model；但同一 provider 反覆出現、
+      // 或在別的 model 上也出現、或餘額探測說它見底時，升級成 provider 層的 quota。
+      const marked =
+        failure.klass === "credit_cap"
+          ? state.health.markCreditCap(provider, modelId, {
+              escalate: state.credits.exhausted(provider) !== undefined,
+            })
+          : state.health.markFailure(provider, modelId, failure.klass);
       saveHealth(state.health);
       if (!alreadyCooling) {
         // 持久化故障歷史（2026-10-05）：health.json 的冷卻會過期／成功即清除，

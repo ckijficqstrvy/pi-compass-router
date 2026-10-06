@@ -76,6 +76,35 @@ test("a 402 for an oversized max_tokens is credit_cap, not account-wide quota", 
   assert.equal(health.isCoolingDown("provider:openrouter", now), false, "不該封整個 provider");
 });
 
+test("a repeated or corroborated credit_cap escalates to a provider-wide quota cooldown", () => {
+  const now = 8_000_000;
+
+  // 外部證據（例如餘額探測說 provider 見底）：第一次就升級。
+  const drained = new ModelHealth();
+  const escalated = drained.markCreditCap("openrouter", "big", { escalate: true, now });
+  assert.ok(escalated.provider, "probe evidence escalates immediately");
+  assert.equal(coolingReason(drained, "openrouter", "another-model", now)?.scope, "provider");
+  assert.equal(escalated.provider?.klass, "quota", "the provider entry carries the longer account-wide cooldown");
+
+  // 同一 provider 上不同 model 也 credit_cap → 第二個升級。
+  const acrossModels = new ModelHealth();
+  assert.equal(acrossModels.markCreditCap("openrouter", "a", { now }).provider, undefined);
+  assert.ok(acrossModels.markCreditCap("openrouter", "b", { now }).provider, "a second model is corroboration");
+
+  // 只有一個 model 的 provider：同一 model 連續兩次也升級。
+  const singleModel = new ModelHealth();
+  assert.equal(singleModel.markCreditCap("deepseek", "only", { now }).provider, undefined);
+  assert.equal(singleModel.markCreditCap("deepseek", "only", { now: now + 5 * 60_000 + 1 }).provider?.scope, "provider");
+});
+
+test("a successful turn resets the credit_cap escalation counter", () => {
+  const now = 8_500_000;
+  const health = new ModelHealth();
+  health.markCreditCap("deepseek", "only", { now });
+  health.clearModel("deepseek", "only");
+  assert.equal(health.markCreditCap("deepseek", "only", { now }).provider, undefined, "counter is back to one");
+});
+
 test("a server error cools only that model, not the provider", () => {
   const health = new ModelHealth();
   const now = 7_000_000;

@@ -7,7 +7,9 @@ import { join } from "node:path";
 import {
   CREDIT_MAX_AGE_MS,
   CreditBook,
+  formatBalance,
   loadCredits,
+  parseDeepSeekBalance,
   parseOpenRouterCredits,
   probeProvider,
   saveCredits,
@@ -38,7 +40,24 @@ test("probeProvider calls the credits endpoint with the bearer key", async () =>
   const remaining = await probeProvider("openrouter", "sk-or-test", { fetchImpl });
   assert.equal(seen?.url, "https://openrouter.ai/api/v1/credits");
   assert.equal(seen?.headers.Authorization, "Bearer sk-or-test");
-  assert.equal(remaining, -0.5);
+  assert.equal(remaining?.remainingUsd, -0.5);
+  assert.equal(remaining?.available, undefined, "OpenRouter has no explicit availability flag");
+});
+
+test("probeProvider hits the DeepSeek balance endpoint", async () => {
+  let seen: { url: string; headers: Record<string, string> } | undefined;
+  const fetchImpl: FetchLike = async (url, init) => {
+    seen = { url, headers: init.headers };
+    return {
+      ok: true,
+      json: async () => ({ is_available: false, balance_infos: [{ currency: "CNY", total_balance: "0.00" }] }),
+    };
+  };
+  const remaining = await probeProvider("deepseek", "sk-ds-test", { fetchImpl });
+  assert.equal(seen?.url, "https://api.deepseek.com/user/balance");
+  assert.equal(seen?.headers.Authorization, "Bearer sk-ds-test");
+  assert.equal(remaining?.available, false);
+  assert.equal(remaining?.currency, "CNY");
 });
 
 test("probeProvider is fail-open on non-2xx, network error, unknown provider, empty key", async () => {
@@ -50,8 +69,38 @@ test("probeProvider is fail-open on non-2xx, network error, unknown provider, em
   assert.equal(await probeProvider("openrouter", "k", { fetchImpl: notOk }), undefined);
   assert.equal(await probeProvider("openrouter", "k", { fetchImpl: throws }), undefined);
   assert.equal(await probeProvider("openrouter", "k", { fetchImpl: malformed }), undefined);
-  assert.equal(await probeProvider("deepseek", "k", { fetchImpl: notOk }), undefined, "no probe defined");
+  assert.equal(await probeProvider("deepseek", "k", { fetchImpl: notOk }), undefined, "non-2xx -> undefined");
+  assert.equal(await probeProvider("deepseek", "k", { fetchImpl: throws }), undefined, "network error -> undefined");
   assert.equal(await probeProvider("openrouter", "", { fetchImpl: notOk }), undefined, "no key");
+});
+
+test("parseDeepSeekBalance reads string numbers and prefers the USD balance", () => {
+  assert.deepEqual(
+    parseDeepSeekBalance({
+      is_available: true,
+      balance_infos: [
+        { currency: "CNY", total_balance: "12.50" },
+        { currency: "USD", total_balance: "3.20" },
+      ],
+    }),
+    { remainingUsd: 3.2, currency: "USD", available: true },
+  );
+  assert.deepEqual(
+    parseDeepSeekBalance({ is_available: false, balance_infos: [{ currency: "CNY", total_balance: "0" }] }),
+    { remainingUsd: 0, currency: "CNY", available: false },
+  );
+});
+
+test("parseDeepSeekBalance is fail-open on malformed payloads", () => {
+  assert.equal(parseDeepSeekBalance(undefined), undefined);
+  assert.equal(parseDeepSeekBalance({}), undefined, "no is_available, no balances");
+  assert.equal(parseDeepSeekBalance({ balance_infos: [{ currency: "CNY", total_balance: "oops" }] }), undefined);
+  assert.equal(parseDeepSeekBalance({ balance_infos: "nope" }), undefined);
+  assert.deepEqual(
+    parseDeepSeekBalance({ is_available: false }),
+    { remainingUsd: 0, available: false },
+    "explicit unavailability is still meaningful without balances",
+  );
 });
 
 test("exhausted blocks zero or negative balances and allows positive", () => {
@@ -66,6 +115,22 @@ test("exhausted blocks zero or negative balances and allows positive", () => {
   assert.equal(book.exhausted("nous-portal", { now }), undefined, "positive balance is allowed");
   assert.equal(book.exhausted("unknown", { now }), undefined, "no data == fail-open");
   assert.equal(book.exhausted("", { now }), undefined);
+});
+
+test("server-reported availability overrides the numeric comparison", () => {
+  const now = 3_000_000;
+  const book = new CreditBook([
+    { provider: "deepseek", remainingUsd: 0, currency: "CNY", available: false, checkedAt: now, source: "test" },
+    { provider: "funded", remainingUsd: -1, available: true, checkedAt: now, source: "test" },
+  ]);
+  assert.equal(book.exhausted("deepseek", { now })?.available, false, "is_available false blocks even at 0 CNY");
+  assert.equal(book.exhausted("funded", { now }), undefined, "is_available true is trusted over the number");
+});
+
+test("formatBalance does not put a dollar sign on non-USD or unavailable balances", () => {
+  assert.equal(formatBalance({ remainingUsd: -0.043946 }), "$-0.0439");
+  assert.equal(formatBalance({ remainingUsd: 0, currency: "CNY" }), "0.00 CNY");
+  assert.equal(formatBalance({ remainingUsd: 0, available: false }), "balance unavailable");
 });
 
 test("exhausted forgets a stale negative balance (fail-open after max age)", () => {

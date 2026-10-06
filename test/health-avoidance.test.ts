@@ -159,6 +159,45 @@ test("a quota failure cools the whole provider", async () => {
   }
 });
 
+test("repeated credit_cap across models escalates to a provider-wide cooldown", async () => {
+  const { handlers, ctx, notices, appends, setModels, cleanup } = await boot();
+  const creditCap =
+    '402: {"message":"This request requires more credits, or fewer max_tokens. You requested up to 131072 tokens, but can only afford 89358.","code":402}';
+  try {
+    // 第一個 model：只冷卻自己，還不封 provider。
+    handlers["message_end"](failedTurn("openrouter", "m2", creditCap), ctx);
+    assert.ok(
+      notices.some((n) => n.message.includes("openrouter/m2 failed")),
+      "a single credit_cap stays model-scoped",
+    );
+    assert.ok(
+      !notices.some((n) => n.message.includes("provider openrouter failed")),
+      "the provider is not blocked after one oversized request",
+    );
+
+    // 同一 provider 的另一個 model 也 credit_cap → 升級為 provider 層 quota。
+    notices.length = 0;
+    handlers["message_end"](failedTurn("openrouter", "m1", creditCap), ctx);
+    assert.ok(
+      notices.some((n) => n.message.includes("provider openrouter failed")),
+      "a second model corroborates that the account is drained",
+    );
+
+    // 下一個路由：整個 provider 都在冷卻，不該再選它。
+    setModels.length = 0;
+    appends.length = 0;
+    notices.length = 0;
+    await handlers["before_agent_start"]({ prompt: "implement a resilient rate limiter in typescript" }, ctx);
+    assert.deepEqual(setModels, [], "no candidate on the drained provider is used");
+    assert.ok(
+      appends.some((entry) => String(entry.reason ?? "").includes("all candidates cooling down")),
+      "the route entry explains the provider-wide block",
+    );
+  } finally {
+    cleanup();
+  }
+});
+
 test("when every candidate is cooling down, the turn is skipped with an explicit reason (B3)", async () => {
   const { handlers, ctx, notices, appends, setModels, cleanup } = await boot();
   try {
