@@ -35,6 +35,11 @@ export interface PlanSnapshot {
   contextTokens: number | null;
   /** 目前模型的費率；未知為 null（價格未知 → 跳過 cache 估算，Part 7）。 */
   currentCost: CostRates | null;
+  /**
+   * 目前模型所屬 provider 已知餘額 < 0（credits.ts）。呼叫端由 CreditBook 算好；
+   * 未提供視為 false。用來豁免 guard 的防抖動 hold（見 guard.ts）。
+   */
+  currentProviderDrained?: boolean;
   todayUsd: number;
   monthUsd: number;
 }
@@ -201,10 +206,14 @@ export function planTurn(
       lastSwitchAtMs: snapshot.lastSwitchAtMs,
       cachePenaltyUsd: cacheMissUsd,
       budgetForced,
+      currentProviderDrained: snapshot.currentProviderDrained,
     },
     config,
     config.mode,
   );
+
+  // 當前 provider 沒錢 → 離開它是硬需求，寫進理由讓 entry 說得清楚。
+  if (snapshot.currentProviderDrained) reasons.push("current provider balance < 0 → moving off it");
 
   // 預算理由與 guard 理由合併（entry 顯示完整因果）。
   const reason = [...reasons, result.reason].filter(Boolean).join(" · ") || undefined;

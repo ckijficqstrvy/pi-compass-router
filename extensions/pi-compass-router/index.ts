@@ -27,6 +27,14 @@ import {
   saveHealth,
   type ModelFailure,
 } from "./health.js";
+import {
+  CREDIT_PROBES,
+  CREDIT_TTL_MS,
+  CreditBook,
+  loadCredits,
+  probeProvider,
+  saveCredits,
+} from "./credits.js";
 import { createLayaClassifier } from "./classify/laya.js";
 import { conversationText } from "./classify/history.js";
 import { classifyInStages } from "./classify/flow.js";
@@ -41,6 +49,7 @@ import { runSettingsWizard, factsAgeDays, type CandidateKind, type WizardHooks }
 import { MODEL_FACTS } from "./policy/facts.js";
 import {
   buildRoutes,
+  canonicalKeyMap,
   capabilityByCanonical,
   type EndpointQuote,
   type RegistryModel,
@@ -53,6 +62,12 @@ import type { CompassConfig, Mode, Target, ThinkingLevel, Tier } from "./schema.
 
 /** 事實檔過舊的提醒門檻（天）；與 wizard 的 STALE_FACTS_DAYS 同值。 */
 const STALE_FACTS_DAYS_HINT = 14;
+
+/**
+ * 餘額探測的單次上限（ms）。首輪前若完全沒有餘額資料，最多等這麼久；
+ * 一般 auth.json 在本地、`/credits` 是單一 GET，遠低於此值。
+ */
+const CREDIT_PROBE_TIMEOUT_MS = 1500;
 
 /** session 生命週期持有的資源（`session_start` 開、`session_shutdown` 收）。 */
 interface SessionState {
@@ -82,6 +97,8 @@ interface SessionState {
   switches: number;
   /** provider/model 健康狀態（錯誤迴避，SPEC Part 8.4）。 */
   health: ModelHealth;
+  /** provider 餘額（credits.ts；餘額 < 0 → 不再路由過去）。 */
+  credits: CreditBook;
   /** 最近一次載入設定的警告（Part 3.4；session_start 顯示）。 */
   configWarnings: string[];
   /** S2：registry 可行集（lazy 建、session 內快取）。 */
@@ -95,7 +112,7 @@ interface SessionState {
 /** 追蹤 session 狀態（工廠不啟動行程，狀態在 session_start 填）。 */
 function createState(): SessionState {
   const { config, warnings } = loadConfig();
-  return { config, switches: 0, health: loadHealth(), configWarnings: warnings };
+  return { config, switches: 0, health: loadHealth(), credits: loadCredits(), configWarnings: warnings };
 }
 
 /** 當前模型 → Target 形狀（`provider/id` + 推導層級，供 guard stickiness/deadband）。 */
@@ -146,12 +163,14 @@ function kindsOf(config: CompassConfig): readonly string[] {
 function snapshotFor(ctx: ExtensionContext, config: CompassConfig, state: SessionState): PlanSnapshot {
   const current = currentTarget(ctx, config);
   const spend = loadSpend();
+  const currentProvider = ctx.model?.provider;
   return {
     currentModel: current?.model ?? null,
     currentTier: current?.tier ?? null,
     lastSwitchAtMs: state.lastSwitchAtMs ?? null,
     contextTokens: ctx.getContextUsage?.()?.tokens ?? null,
     currentCost: costRatesOf(ctx.model),
+    currentProviderDrained: currentProvider !== undefined && state.credits.exhausted(currentProvider) !== undefined,
     todayUsd: spend.todayUsd,
     monthUsd: spend.monthUsd,
   };
@@ -203,7 +222,11 @@ function registryTablesFor(ctx: ExtensionContext, state: SessionState): { routes
       contextWindow: (model as { contextWindow?: number }).contextWindow,
     };
   });
-  const routes = buildRoutes(registry, { endpointsByKey: loadEndpointCache() });
+  // 直連 provider 的裸 id 要用 facts 的 canonical 對上身分，否則會被當未評分。
+  const routes = buildRoutes(registry, {
+    endpointsByKey: loadEndpointCache(),
+    canonicalByKey: canonicalKeyMap(MODEL_FACTS.models),
+  });
   const { byCanonical } = capabilityByCanonical(MODEL_FACTS.models);
   const capability = new Map<string, number>();
   for (const [canonical, entry] of byCanonical) capability.set(canonical, entry.capability.intelligence);
@@ -222,13 +245,22 @@ function depsFor(ctx: ExtensionContext, state: SessionState, avoided?: string[])
   const prefs = tables === undefined ? undefined : preferencesFor(state);
   return {
     isAvailable: (candidate) => {
-      if (resolveModel(ctx, candidate) === undefined) return false;
+      const resolved = resolveModel(ctx, candidate);
+      if (resolved === undefined) return false;
       if (health) {
         const bad = coolingReason(health, candidate.provider, candidate.model);
         if (bad) {
           avoided?.push(`${candidate.provider}/${candidate.model} (${bad.label})`);
           return false;
         }
+      }
+      // 餘額閘（credits.ts）：known 餘額 < 0 的 provider 整批不可用。用解析後的
+      // provider，裸 id 的 prefer 條目（provider 為 ""）才不會繞過。
+      const providerName = candidate.provider || resolved.provider;
+      const drained = providerName ? state.credits.exhausted(providerName) : undefined;
+      if (drained) {
+        avoided?.push(`${providerName} (balance $${drained.remainingUsd.toFixed(4)})`);
+        return false;
       }
       return true;
     },
@@ -641,12 +673,65 @@ function reloadConfig(state: SessionState): CompassConfig {
 export default function compass(pi: ExtensionAPI): void {
   const state = createState();
 
+  // 餘額閘（credits.ts）：非阻塞探測，只有過期（或 force）才真的打 API；
+  // 結果供 deps.isAvailable 做硬過濾。全程 fail-open（Part 2），探測失敗不改路由。
+  let creditRefreshInFlight: Promise<void> | undefined;
+  let creditPrimed = false;
+  function refreshCredits(ctx: ExtensionContext, force = false): Promise<void> {
+    if (creditRefreshInFlight) return creditRefreshInFlight;
+    const now = Date.now();
+    const targets = Object.keys(CREDIT_PROBES).filter(
+      (provider) => force || state.credits.stale(provider, now, CREDIT_TTL_MS),
+    );
+    if (targets.length === 0) return Promise.resolve();
+    creditRefreshInFlight = (async () => {
+      try {
+        const signal = AbortSignal.timeout(CREDIT_PROBE_TIMEOUT_MS);
+        for (const provider of targets) {
+          const apiKey = await ctx.modelRegistry.getApiKeyForProvider(provider);
+          if (!apiKey) continue;
+          const remainingUsd = await probeProvider(provider, apiKey, { signal });
+          if (remainingUsd === undefined) continue;
+          state.credits.set({
+            provider,
+            remainingUsd,
+            checkedAt: Date.now(),
+            source: CREDIT_PROBES[provider].url,
+          });
+        }
+        saveCredits(state.credits);
+      } catch {
+        // fail-open：餘額查不到就維持上一次的判定。
+      } finally {
+        creditRefreshInFlight = undefined;
+      }
+    })();
+    return creditRefreshInFlight;
+  }
+
+  /**
+   * 首輪前若**完全沒有**餘額資料，有上限地等一次探測；否則第一則訊息會在
+   * 探測回來前就先路由，仍可能打在已知見底的 provider 上（2026-10-06 實測）。
+   * 每 session 只等一次；之後的輪次只做非阻塞刷新。
+   */
+  async function primeCredits(ctx: ExtensionContext): Promise<void> {
+    if (creditPrimed) return;
+    creditPrimed = true;
+    if (Object.keys(CREDIT_PROBES).every((provider) => state.credits.get(provider) !== undefined)) return;
+    await Promise.race([
+      refreshCredits(ctx),
+      new Promise<void>((resolve) => setTimeout(resolve, CREDIT_PROBE_TIMEOUT_MS)),
+    ]);
+  }
+
   // session lifecycle：載入設定 + 預熱 laya（由 reloadConfig 重建時預熱，
   // 輸入沒變則沿用既有的暖子行程）；關閉時拆除。
   pi.on("session_start", (_event, ctx) => {
     // 跨行程讀回其他 session 標記的健康狀態（Part 8.4；best-effort）。
     state.health = loadHealth();
+    state.credits = loadCredits();
     reloadConfig(state);
+    void refreshCredits(ctx);
     if (ctx?.hasUI && state.configWarnings.length > 0) {
       ctx.ui.notify(`compass config:\n${state.configWarnings.slice(0, 5).join("\n")}`, "warning");
     }
@@ -698,6 +783,8 @@ export default function compass(pi: ExtensionAPI): void {
     if (message.stopReason === "error") {
       const failure = classifyModelError(message.errorMessage, message.rawStopReason);
       if (!failure) return; // context overflow 等：pi 會自行重試，不標記
+      // 402/額度錯誤可能代表「餘額假設過時」：立刻重探一次，讓 < 0 立刻生效。
+      if (failure.klass === "credit_cap" || failure.klass === "quota") void refreshCredits(ctx, true);
       const alreadyCooling =
         state.health.isCoolingDown(modelKey) || state.health.isCoolingDown(`provider:${provider}`);
       const marked = state.health.markFailure(provider, modelId, failure.klass);
@@ -736,6 +823,8 @@ export default function compass(pi: ExtensionAPI): void {
 
   // 路由鉤子：每輪 agent 前（Part 5）。fail-open 在 routeTurn 內。
   pi.on("before_agent_start", async (event, ctx) => {
+    await primeCredits(ctx); // 首輪最多等一次探測；其後非阻塞
+    void refreshCredits(ctx); // routeTurn 只用 last-known 餘額
     await routeTurn(pi, ctx, state, event.prompt);
   });
 

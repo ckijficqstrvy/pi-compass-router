@@ -31,6 +31,13 @@ export interface GuardState {
   cachePenaltyUsd?: number;
   /** 預算是否強制改變了層級（由 `applyBudget` 決定）——deadband/cooldown 的豁免依據。 */
   budgetForced?: boolean;
+  /**
+   * 目前模型所屬 provider 已知餘額 < 0（credits.ts）。留在原地等於必然失敗，
+   * 所以和 `budgetForced` 一樣豁免所有「先不切」的防抖動守衛（deadband /
+   * cache 懲罰 / cooldown）。沒有這個，guard 會為了保住一個已經沒錢的
+   * provider 上的 warm cache 而 hold（2026-10-06 實測）。
+   */
+  currentProviderDrained?: boolean;
 }
 
 /** Stage 4 輸出。 */
@@ -108,6 +115,8 @@ export function guard(
 ): GuardResult {
   const { target, tier: requestedTier, demand } = request;
   const budgetForced = state.budgetForced === true;
+  // 必須離開當前 provider（預算強制降級，或當前 provider 已無餘額）。
+  const mustMove = budgetForced || state.currentProviderDrained === true;
   let tier = requestedTier;
 
   // 1. stickiness — 當前已是目標 → held（層級沿用當前，Part 5）。
@@ -145,7 +154,7 @@ export function guard(
     // 預算強制變更同時豁免 deadband：錢的約束優先於「需求不確定性」，
     // 與它已有的 cooldown 豁免一致（Part 7）。否則 soft/hard 降級會先被
     // 死區擋住，預算政策形同虛設。
-    if (withinBand && !bypass && !budgetForced) {
+    if (withinBand && !bypass && !mustMove) {
       return {
         outcome: "held",
         tier: state.currentTier,
@@ -162,7 +171,8 @@ export function guard(
     !bypass &&
     // N1（2026-10-03 複審）：預算強制變更同樣豁免 cache 懲罰——「錢的約束優先」
     // 與 deadband/cooldown 的豁免一致，否則 1 階 soft 降級在長 context 下會被擋回貴層。
-    !budgetForced &&
+    // 2026-10-06：當前 provider 已無餘額（mustMove）也豁免——沒錢的 warm cache 沒價值。
+    !mustMove &&
     // 2026-10-03 校準：cache penalty 只抑制「同層互換與降級」。
     // 明確的升級是路由器的目的，且固定 USD 上限會隨 context 變大而失效
     // （60k tokens 就會擋掉 $1/M 升級）——不讓一次性 cache 成本擋升級。
@@ -179,7 +189,7 @@ export function guard(
 
   // 4. cooldown（Part 7）：大跳與 hardRatio 降級豁免。
   const cooldownSeconds = config.cache.cooldownSeconds;
-  if (holdGuardsArmed && cooldownSeconds > 0 && state.lastSwitchAtMs !== null && !budgetForced && !bypass) {
+  if (holdGuardsArmed && cooldownSeconds > 0 && state.lastSwitchAtMs !== null && !mustMove && !bypass) {
     const elapsedMs = Date.now() - state.lastSwitchAtMs;
     if (elapsedMs < cooldownSeconds * 1000) {
       return {

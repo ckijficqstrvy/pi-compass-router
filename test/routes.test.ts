@@ -9,6 +9,7 @@ import {
   bestEndpoint,
   blendedOf,
   buildRoutes,
+  canonicalKeyMap,
   canonicalOf,
   capabilityByCanonical,
   isHealthy,
@@ -102,4 +103,21 @@ test("buildRoutes falls back to the registry cost when no endpoint cache is give
   const routes = buildRoutes([{ provider: "openrouter", id: "a/b", cost: { input: 1, output: 2 }, contextWindow: 1000 }]);
   assert.equal(routes.length, 1);
   assert.deepEqual(routes[0].endpoints, [{ upstream: "openrouter", input: 1, output: 2, contextWindow: 1000 }]);
+});
+
+test("canonicalKeyMap maps only facts that declare a canonical identity", () => {
+  const facts: ModelFact[] = [
+    {
+      provider: "deepseek",
+      model: "deepseek-flash",
+      canonical: "deepseek/deepseek-v4.1-flash",
+      capability: { intelligence: 39 },
+    },
+    { provider: "openrouter", model: "deepseek/deepseek-v4.1-flash", capability: { intelligence: 39 } },
+    { provider: "x", model: "y", canonical: "   ", capability: { intelligence: 30 } },
+  ];
+  const map = canonicalKeyMap(facts);
+  assert.equal(map.get("deepseek/deepseek-flash"), "deepseek/deepseek-v4.1-flash");
+  assert.equal(map.has("openrouter/deepseek/deepseek-v4.1-flash"), false, "no explicit canonical -> absent");
+  assert.equal(map.has("x/y"), false, "whitespace canonical -> absent");
 });

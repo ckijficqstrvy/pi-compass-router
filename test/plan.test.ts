@@ -140,6 +140,42 @@ test("unknown prices skip the cache estimate entirely (never guess)", () => {
   assert.equal(plan.guard?.outcome, "applied", "no estimate → no cache hold");
 });
 
+test("a drained current provider bypasses the cache hold (must move off it)", () => {
+  // 2026-10-06 實測：openrouter 餘額 < 0，compass 已選到 deepseek，但 guard 為了
+  // 保住 openrouter 的 warm cache 而 hold，於是仍然打在沒錢的 provider 上。
+  const contextTokens = 100_000;
+  const nextCost: CostRates = { input: 1, output: 0, cacheRead: 0, cacheWrite: 1 }; // would be a $0.20 miss
+  const plan = planTurn(
+    judgmentFor(1.9),
+    configWith(),
+    snapshotWith({
+      currentTier: "high",
+      contextTokens,
+      currentCost: { input: 0, cacheRead: 0, cacheWrite: 0 },
+      currentProviderDrained: true,
+    }),
+    { isAvailable: () => true, costOf: () => nextCost },
+  );
+  assert.equal(plan.guard?.outcome, "applied", "a drained provider must not keep its warm cache");
+  assert.match(String(plan.guard?.reason), /balance < 0/);
+});
+
+test("the same cache penalty still holds when the provider is funded", () => {
+  const nextCost: CostRates = { input: 1, output: 0, cacheRead: 0, cacheWrite: 1 };
+  const plan = planTurn(
+    judgmentFor(1.9),
+    configWith(),
+    snapshotWith({
+      currentTier: "high",
+      contextTokens: 100_000,
+      currentCost: { input: 0, cacheRead: 0, cacheWrite: 0 },
+      currentProviderDrained: false,
+    }),
+    { isAvailable: () => true, costOf: () => nextCost },
+  );
+  assert.equal(plan.guard?.outcome, "held");
+});
+
 test("no available model yields unavailable (caller writes the skip entry)", () => {
   const plan = planTurn(judgmentFor(1.9), configWith(), snapshotWith(), { isAvailable: () => false, costOf: () => null });
   assert.equal(plan.unavailable, true);

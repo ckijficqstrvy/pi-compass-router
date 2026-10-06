@@ -77,6 +77,21 @@ export function canonicalOf(provider: string, model: string, override?: string):
 }
 
 /**
+ * 由 facts 建 `provider/model → canonical` 對應，供 `buildRoutes` 的
+ * `canonicalByKey` 使用。只收**明確寫了 `canonical`** 的條目：直連 provider 的
+ * 裸 id（`deepseek-flash`）靠它才對得上聚合商的 `maker/model` 身分，
+ * 否則能力查不到、被當成未評分。
+ */
+export function canonicalKeyMap(facts: readonly ModelFact[]): Map<string, string> {
+  const out = new Map<string, string>();
+  for (const fact of facts) {
+    const canonical = fact.canonical?.trim();
+    if (canonical) out.set(`${fact.provider}/${fact.model}`, canonical);
+  }
+  return out;
+}
+
+/**
  * 把 facts 收斂成 `canonical → capability`。同一 canonical 在不同條目分數不一致時，
  * 全部列入 `conflicts`（資料完整性訊號；不自動裁決誰對）。
  */
